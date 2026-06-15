@@ -1,0 +1,3 @@
+# Plain text input is also accepted.
+https://doi.org/10.1000/exact.2020
+10.1000/dataset.2023

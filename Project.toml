@@ -1,0 +1,32 @@
+name = "PaperFetch"
+uuid = "5ac78112-2af7-4d90-b07d-b58f2e7736b1"
+version = "0.2.0"
+authors = ["ChatGPT generated starter tool"]
+
+[deps]
+ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"
+BibParser = "13533e5b-e1c2-4e57-8cef-cac5e52f6474"
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
+IncCSV = "66f2fdda-89f9-4824-87f0-56b432c695d5"
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+URIs = "5c2747f8-b7ea-4ff2-ba2e-563bfd36b1d4"
+Unicode = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
+
+[compat]
+ArgParse = "1.2.0"
+BibParser = "0.2.3"
+Dates = "1.11.0"
+HTTP = "2.2.0"
+IncCSV = "0.1.0"
+JSON3 = "1.14.3"
+SHA = "0.7.0"
+URIs = "1.6.1"
+Unicode = "1.11.0"
+
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]

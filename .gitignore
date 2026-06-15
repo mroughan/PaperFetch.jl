@@ -1,0 +1,15 @@
+*.cov
+*.mem
+*.ji
+*.so
+*.dylib
+*.dll
+*.dSYM/
+
+.DS_Store
+
+paperfetch_out/
+downloads/
+sourcecheck/
+
+Manifest.toml.tmp

@@ -1,0 +1,108 @@
+{
+  "records": [
+    {
+      "key": "doe2020exact",
+      "provider": "fixture-crossref",
+      "id": "10.1000/exact.2020",
+      "title": "A Small Study of Bibliography Checking",
+      "authors": ["Jane Doe", "John Smith"],
+      "year": "2020",
+      "doi": "10.1000/exact.2020",
+      "journal": "Journal of Careful References",
+      "pages": "12--19",
+      "pdf_url": "https://example.org/papers/exact.pdf"
+    },
+    {
+      "key": "doe2021case",
+      "provider": "fixture-crossref",
+      "id": "10.1000/case.2021",
+      "title": "A Small Study of Bibliography Checking",
+      "authors": ["Jane Doe"],
+      "year": "2021",
+      "doi": "10.1000/case.2021",
+      "journal": "Journal of Careful References",
+      "pages": "20--25"
+    },
+    {
+      "key": "garcia2022accents",
+      "provider": "fixture-crossref",
+      "id": "10.1000/accents.2022",
+      "title": "Cafe Data and Resume Matching",
+      "authors": ["Ana Garcia"],
+      "year": "2022",
+      "doi": "10.1000/accents.2022",
+      "journal": "Metadata Practice"
+    },
+    {
+      "key": "nguyen2019missing",
+      "provider": "fixture-crossref",
+      "id": "10.1000/missing.2019",
+      "title": "Identifier Gaps in Small Bibliographies",
+      "authors": ["Linh Nguyen"],
+      "year": "2019",
+      "doi": "10.1000/missing.2019",
+      "journal": "Reference Engineering",
+      "pages": "1--8"
+    },
+    {
+      "key": "patel2018conflict",
+      "provider": "fixture-crossref",
+      "id": "10.1000/correct.2018",
+      "title": "When Identifiers Disagree",
+      "authors": ["Mira Patel"],
+      "year": "2018",
+      "doi": "10.1000/correct.2018",
+      "journal": "Reference Engineering"
+    },
+    {
+      "key": "juliaDocs2024",
+      "provider": "fixture-landing-page",
+      "id": "julia-manual",
+      "title": "The Julia Manual",
+      "authors": ["Julia Documentation Team"],
+      "year": "2024",
+      "url": "https://docs.julialang.org/"
+    },
+    {
+      "key": "lee2023dataset",
+      "provider": "fixture-datacite",
+      "id": "10.1000/dataset.2023",
+      "title": "Small Bibliography Validation Dataset",
+      "authors": ["Morgan Lee"],
+      "year": "2023",
+      "doi": "10.1000/dataset.2023",
+      "publisher": "Example Data Archive"
+    },
+    {
+      "key": "chen2024arxiv",
+      "provider": "fixture-arxiv",
+      "id": "2401.01234",
+      "title": "Preprints as Bibliography Sources",
+      "authors": ["Rui Chen", "Sam O'Neil"],
+      "year": "2024",
+      "url": "https://arxiv.org/abs/2401.01234",
+      "pdf_url": "https://arxiv.org/pdf/2401.01234"
+    },
+    {
+      "key": "martin2017chapter",
+      "provider": "fixture-crossref",
+      "id": "10.1000/chapter.2017",
+      "title": "Reference Checking in Edited Volumes",
+      "authors": ["Eve Martin"],
+      "year": "2017",
+      "doi": "10.1000/chapter.2017",
+      "pages": "101--120",
+      "publisher": "Example Press"
+    },
+    {
+      "key": "owens2025report",
+      "provider": "fixture-landing-page",
+      "id": "open-reference-lab-report",
+      "title": "A Report Without a PDF",
+      "authors": ["Taylor Owens"],
+      "year": "2025",
+      "url": "https://example.org/reports/no-pdf",
+      "publisher": "Open Reference Lab"
+    }
+  ]
+}
