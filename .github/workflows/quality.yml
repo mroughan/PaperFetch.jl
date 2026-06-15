@@ -1,0 +1,62 @@
+name: Quality
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  jet:
+    name: JET
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1'
+
+      - uses: julia-actions/cache@v2
+
+      - uses: julia-actions/julia-buildpkg@v1
+
+      - name: Run JET
+        run: |
+          julia --project -e '
+            using Pkg
+            Pkg.add("JET")
+            using JET, PaperFetch
+            report = JET.report_package(PaperFetch; target_defined_modules=true)
+            if !isempty(JET.get_reports(report))
+              display(report)
+              exit(1)
+            end
+            println("JET: no issues found")
+          '
+
+  aqua:
+    name: Aqua
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1'
+
+      - uses: julia-actions/cache@v2
+
+      - uses: julia-actions/julia-buildpkg@v1
+
+      - name: Run Aqua
+        run: |
+          julia --project -e '
+            using Pkg
+            Pkg.add("Aqua")
+            using Aqua, PaperFetch
+            Aqua.test_all(PaperFetch; ambiguities=false)
+          '

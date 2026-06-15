@@ -30,6 +30,10 @@ Downloaded on: 2026-06-15
   - Note: an attempted download of a guessed GitHub raw docs URL returned 404,
     so no remote BibParser documentation file is stored here.
 
+- Documenter.jl v1.17.0 local package README, docs build script, and source in
+  `/home/matt/.julia/packages/Documenter/AXNMp`.
+  - Purpose: docs layout, `makedocs`, docstring expansion, and local HTML build.
+
 ## Uncertainties
 
 - Provider APIs can change. The API adapters in `src/PaperFetch.jl` are small

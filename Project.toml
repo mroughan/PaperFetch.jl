@@ -1,7 +1,7 @@
 name = "PaperFetch"
 uuid = "5ac78112-2af7-4d90-b07d-b58f2e7736b1"
 version = "0.2.0"
-authors = ["ChatGPT generated starter tool"]
+authors = ["Matthew Roughan <matthew.roughan@adelaide.edu.au>"]
 
 [deps]
 ArgParse = "c7e460c6-2fb9-53a9-8c5b-16f535851c63"

@@ -9,7 +9,10 @@
 .DS_Store
 
 paperfetch_out/
+paperfetch_online_out/
 downloads/
 sourcecheck/
+docs/build/
 
+Manifest.toml
 Manifest.toml.tmp
