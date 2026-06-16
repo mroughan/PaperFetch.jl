@@ -34,7 +34,7 @@ Provider selection order:
 1. A `FixtureProvider` is added when `fixture` is set.
 2. Explicitly supplied `providers` are appended.
 3. An `ApiProvider` (Crossref, OpenAlex, Unpaywall, DataCite, arXiv) is added
-   when `use_apis=true` and no other providers have been supplied yet.
+   when `use_apis=true`.
 4. If still empty, a `CandidateProvider` is used as a read-only fallback.
 
 Set `cache_dir` to a directory path to cache API responses between runs.
@@ -58,7 +58,7 @@ function check_bibliography(path::AbstractString;
     active  = AbstractProvider[]
     fixture === nothing || push!(active, records_from_json(fixture))
     append!(active, providers)
-    if isempty(active) && use_apis
+    if use_apis
         push!(active, ApiProvider(email=email, cache_dir=cache_dir))
     end
     isempty(active) && push!(active, CandidateProvider())

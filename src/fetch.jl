@@ -68,7 +68,7 @@ function download_pdf(url::String, dest::String; cookies=Dict{String,String}(),
     headers = ["User-Agent" => DEFAULT_USER_AGENT]
     cookie  = cookie_for_url(cookies, actual)
     cookie === nothing || push!(headers, "Cookie" => cookie)
-    response = http_get(actual, headers; redirect=true, readtimeout=timeout, status_exception=false)
+    response = http_get(actual, headers; redirect=true, read_idle_timeout=timeout, status_exception=false)
     body  = Vector{UInt8}(response.body)
     ctype = lowercase(String(HTTP.header(response, "Content-Type", "")))
     looks_pdf = occursin("pdf", ctype) || (length(body) >= 4 && body[1:4] == UInt8['%','P','D','F'])

@@ -104,11 +104,47 @@ and joins with `;`. Order-invariant.
 normalize_authors("Smith, J. and Doe, J.") == normalize_authors("Doe, J. and Smith, J.")
 ```
 """
+function normalize_author_part(value::AbstractString)
+    text = strip(value)
+    if occursin(",", text)
+        pieces = split(text, ","; limit=2)
+        text = strip(pieces[2]) * " " * strip(pieces[1])
+    end
+    return normalize_text(text)
+end
+
 function normalize_authors(value::AbstractString)
+    value = replace(value, r"(?i)\bet\.?\s+al\.?" => "")
     parts = split(value, r"\s+(?:and|&)\s+"i)
-    clean = normalize_text.(parts)
+    clean = normalize_author_part.(parts)
     sort!(filter!(!isempty, clean))
     return join(clean, ";")
+end
+
+function edit_distance(left::AbstractString, right::AbstractString)
+    a = collect(left)
+    b = collect(right)
+    previous = collect(0:length(b))
+    current = similar(previous)
+    for (i, ca) in enumerate(a)
+        current[1] = i
+        for (j, cb) in enumerate(b)
+            current[j + 1] = min(
+                previous[j + 1] + 1,
+                current[j] + 1,
+                previous[j] + (ca == cb ? 0 : 1),
+            )
+        end
+        previous, current = current, previous
+    end
+    return previous[end]
+end
+
+function near_match(left::AbstractString, right::AbstractString; max_ratio::Float64=0.12)
+    (isempty(left) || isempty(right)) && return false
+    distance = edit_distance(left, right)
+    scale = max(length(collect(left)), length(collect(right)))
+    return scale > 0 && distance / scale <= max_ratio
 end
 
 """

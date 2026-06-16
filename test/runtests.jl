@@ -26,7 +26,13 @@ end
 
     @test PaperFetch.normalize_authors("Smith, J. and Doe, J.") ==
           PaperFetch.normalize_authors("Doe, J. and Smith, J.")
+    @test PaperFetch.normalize_authors("García, Ana and Müller, Max") ==
+          PaperFetch.normalize_authors("Muller, Max and Garcia, Ana")
+    @test PaperFetch.normalize_authors("Smith, Jane et al.") ==
+          PaperFetch.normalize_authors("Smith, Jane")
     @test !isempty(PaperFetch.normalize_authors("Smith, J. and Doe, J."))
+    @test PaperFetch.near_match("bibliography checking", "bibliogrpahy checking")
+    @test !PaperFetch.near_match("bibliography checking", "network calculus")
 
     @test PaperFetch.comparison_score(FieldComparison[]) == 0.0
     @test PaperFetch.comparison_score([FieldComparison("doi", :exact, "x", "x", "")]) == 1.0
@@ -50,6 +56,18 @@ end
     # Matching (order-invariant) author strings should give :equivalent or :exact
     cmp2 = PaperFetch.compare_value("author", "Jane Doe and John Smith", "John Smith and Jane Doe")
     @test cmp2.status in (:exact, :equivalent)
+
+    cmp3 = PaperFetch.compare_value("author", "García, Ana and Müller, Max", "Ana Garcia and Max Muller")
+    @test cmp3.status in (:exact, :equivalent)
+
+    cmp4 = PaperFetch.compare_value("author", "Jane Smith et al.", "Jane Smith and John Doe and Ana Garcia")
+    @test cmp4.status == :ambiguous
+
+    cmp5 = PaperFetch.compare_value("author", "Jane Smiht", "Jane Smith")
+    @test cmp5.status == :ambiguous
+
+    title_cmp = PaperFetch.compare_value("title", "A small bibliogrpahy checker", "A small bibliography checker")
+    @test title_cmp.status == :ambiguous
 end
 
 @testset "BibTeX and plain input" begin
@@ -91,6 +109,33 @@ end
     e_isbn   = BibEntry("z", "book", Dict("isbn" => "978-3-16-148410-0"))
     ids_isbn = extract_identifiers(e_isbn)
     @test any(id -> id.kind == :isbn, ids_isbn)
+
+    e_note = BibEntry("note_doi", "article", Dict(
+        "title" => "DOI in the wrong field",
+        "note" => "Published as doi:10.1234/ABC.DEF.",
+    ))
+    ids_note = extract_identifiers(e_note)
+    @test any(id -> id.kind == :doi && id.value == "10.1234/abc.def", ids_note)
+
+    e_url = BibEntry("url_doi", "article", Dict(
+        "url" => "https://doi.org/10.7554/eLife.32822",
+    ))
+    ids_url = extract_identifiers(e_url)
+    @test any(id -> id.kind == :doi && id.value == "10.7554/elife.32822", ids_url)
+    @test any(id -> id.kind == :url, ids_url)
+end
+
+@testset "provider URL construction and errors" begin
+    @test PaperFetch.doi_api_path("10.7554/eLife.32822") == "10.7554/elife.32822"
+    @test PaperFetch.doi_api_path("https://doi.org/10.5281/zenodo.1234") ==
+          "10.5281/zenodo.1234"
+
+    err_source = SourceRecord(provider="crossref-error", doi="10.1000/x",
+        raw=Dict{String,Any}("error" => "HTTP 404"))
+    report = compare_entry(BibEntry("x", "article", Dict("doi" => "10.1000/x")), [err_source])
+    @test report.confidence == 0.0
+    @test isempty(report.comparisons)
+    @test any(note -> occursin("provider error", note), report.notes)
 end
 
 @testset "comparison statuses from examples" begin
@@ -116,6 +161,34 @@ end
         end
         @test 0.0 <= reports[1].confidence <= 1.0
     end
+end
+
+@testset "misplaced DOI bibliography lookup" begin
+    dir = mktempdir()
+    bib = joinpath(dir, "misplaced.bib")
+    fixture = joinpath(dir, "fixture.json")
+    write(bib, """
+    @article{wrongfield,
+      author = {Example, Erin},
+      title = {DOI In The Notes Field},
+      year = {2024},
+      note = {The DOI is https://doi.org/10.9999/wrongfield.2024}
+    }
+    """)
+    write(fixture, """
+    {"records":[{
+      "provider":"fixture",
+      "id":"10.9999/wrongfield.2024",
+      "title":"DOI in the Notes Field",
+      "authors":["Erin Example"],
+      "year":"2024",
+      "doi":"10.9999/wrongfield.2024"
+    }]}
+    """)
+    reports = check_bibliography(bib; fixture, check=:none)
+    @test length(reports) == 1
+    @test any(cmp -> cmp.field == "doi" && cmp.status == :missing_input, reports[1].comparisons)
+    @test any(source -> source.provider == "fixture", reports[1].sources)
 end
 
 @testset "reports" begin

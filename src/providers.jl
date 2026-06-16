@@ -65,7 +65,7 @@ end
 struct CandidateProvider <: AbstractProvider end
 
 function default_get_json(url::AbstractString; headers=Pair{String,String}[])
-    response = HTTP.get(String(url), headers; redirect=true, status_exception=false, readtimeout=30)
+    response = HTTP.get(String(url), headers; redirect=true, status_exception=false, read_idle_timeout=30)
     if !(200 <= response.status < 300)
         error("HTTP $(response.status) for $(url)")
     end
@@ -73,7 +73,7 @@ function default_get_json(url::AbstractString; headers=Pair{String,String}[])
 end
 
 function default_get_text(url::AbstractString; headers=Pair{String,String}[])
-    response = HTTP.get(String(url), headers; redirect=true, status_exception=false, readtimeout=30)
+    response = HTTP.get(String(url), headers; redirect=true, status_exception=false, read_idle_timeout=30)
     if !(200 <= response.status < 300)
         error("HTTP $(response.status) for $(url)")
     end
@@ -84,12 +84,18 @@ function provider_get_json(provider::ApiProvider, url::String; headers=Pair{Stri
     provider.cache_dir === nothing && return provider.get_json(url; headers)
     key = bytes2hex(sha256(url))
     path = joinpath(provider.cache_dir, key * ".json")
+    metapath = joinpath(provider.cache_dir, key * ".meta.json")
     if isfile(path)
         return JSON3.read(read(path, String))
     end
     result = provider.get_json(url; headers)
     mkpath(provider.cache_dir)
     write(path, JSON3.write(result))
+    write(metapath, JSON3.write(Dict(
+        "url" => url,
+        "cached_at" => string(Dates.now()),
+        "format" => "json",
+    )))
     return result
 end
 
@@ -97,12 +103,18 @@ function provider_get_text(provider::ApiProvider, url::String; headers=Pair{Stri
     provider.cache_dir === nothing && return provider.get_text(url; headers)
     key = bytes2hex(sha256(url))
     path = joinpath(provider.cache_dir, key * ".xml")
+    metapath = joinpath(provider.cache_dir, key * ".meta.json")
     if isfile(path)
         return read(path, String)
     end
     result = provider.get_text(url; headers)
     mkpath(provider.cache_dir)
     write(path, result)
+    write(metapath, JSON3.write(Dict(
+        "url" => url,
+        "cached_at" => string(Dates.now()),
+        "format" => "text",
+    )))
     return result
 end
 
@@ -147,9 +159,9 @@ end
 
 function sources_for(provider::FixtureProvider, entry::BibEntry)
     sources = copy(get(provider.bykey, entry.key, SourceRecord[]))
-    doi = get(entry.fields, "doi", nothing)
-    if doi !== nothing
-        for rec in get(provider.bydoi, normalize_doi(doi), SourceRecord[])
+    for identifier in extract_identifiers(entry)
+        identifier.kind == :doi || continue
+        for rec in get(provider.bydoi, normalize_doi(identifier.value), SourceRecord[])
             rec in sources || push!(sources, rec)
         end
     end
@@ -209,9 +221,11 @@ end
 
 # ─── API adapters ────────────────────────────────────────────────────────────
 
+doi_api_path(doi::AbstractString) = replace(escapeuri(normalize_doi(doi)), "%2F" => "/", "%2f" => "/")
+
 function crossref_records(provider::ApiProvider, doi::AbstractString)
-    url = "https://api.crossref.org/works/$(escapeuri(normalize_doi(doi)))"
-    headers = ["User-Agent" => "$(provider.user_agent)", "mailto" => provider.email]
+    url = "https://api.crossref.org/works/$(doi_api_path(doi))"
+    headers = ["User-Agent" => "$(provider.user_agent) (mailto:$(provider.email))"]
     try
         obj = provider_get_json(provider, url; headers)
         msg = obj.message
@@ -227,7 +241,9 @@ function crossref_records(provider::ApiProvider, doi::AbstractString)
         for date_field in (Symbol("published-print"), Symbol("published-online"), :issued)
             if hasproperty(msg, date_field)
                 parts = getproperty(msg, date_field)[Symbol("date-parts")]
-                isempty(parts) || isempty(parts[1]) && continue
+                if isempty(parts) || isempty(parts[1])
+                    continue
+                end
                 year = string(parts[1][1])
                 break
             end
@@ -258,7 +274,7 @@ function crossref_records(provider::ApiProvider, doi::AbstractString)
 end
 
 function openalex_records(provider::ApiProvider, doi::AbstractString)
-    url = "https://api.openalex.org/works/doi:$(escapeuri(normalize_doi(doi)))?mailto=$(escapeuri(provider.email))"
+    url = "https://api.openalex.org/works/doi:$(doi_api_path(doi))?mailto=$(escapeuri(provider.email))"
     try
         obj = provider_get_json(provider, url)
         authors = String[]
@@ -291,7 +307,7 @@ function openalex_records(provider::ApiProvider, doi::AbstractString)
 end
 
 function unpaywall_records(provider::ApiProvider, doi::AbstractString)
-    url = "https://api.unpaywall.org/v2/$(escapeuri(normalize_doi(doi)))?email=$(escapeuri(provider.email))"
+    url = "https://api.unpaywall.org/v2/$(doi_api_path(doi))?email=$(escapeuri(provider.email))"
     try
         obj = provider_get_json(provider, url)
         pdf_url = nothing
@@ -311,7 +327,7 @@ end
 
 function datacite_records(provider::ApiProvider, doi::AbstractString)
     clean = normalize_doi(doi)
-    url = "https://api.datacite.org/dois/$(escapeuri(clean))"
+    url = "https://api.datacite.org/dois/$(doi_api_path(clean))"
     try
         obj = provider_get_json(provider, url)
         attrs = obj.data.attributes

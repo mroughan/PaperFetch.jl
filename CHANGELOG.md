@@ -59,11 +59,11 @@
   URL extraction.
 - Added `cookie and proxy helpers` testset covering `read_cookie_file`
   (including `#HttpOnly_` prefix), `cookie_for_url`, and `proxied_url`.
-- Fixed `fake_get` mock in fetch tests to use `readtimeout` keyword matching
-  the current HTTP.jl API.
+- Fixed `fake_get` mock in fetch tests to accept current HTTP.jl timeout
+  keywords.
 
 ### CI/CD
-- Added `.github/workflows/ci.yml`: tests on Julia 1.10, 1.11, and nightly
+- Added `.github/workflows/ci.yml`: tests on Julia 1.11 and nightly
   with Codecov coverage upload.
 - Added `.github/workflows/quality.yml`: JET and Aqua checks on latest Julia
   only, separate from main CI.
@@ -92,3 +92,16 @@
   pages generated from package docstrings.
 - Added manually triggered online field tests using real DOI-backed
   open-access examples.
+- Fixed Documenter API coverage for newly exported identifier types and
+  functions.
+- Fixed provider error records so failed API calls no longer score as
+  successful DOI matches.
+- Fixed provider DOI URL construction to preserve DOI path slashes for metadata
+  APIs.
+- Replaced deprecated HTTP timeout keywords with `read_idle_timeout`.
+- Added cache provenance sidecars for API response caches.
+- Added DOI recovery from misplaced fields such as `note`, `url`, and
+  `howpublished`.
+- Added normalization and comparison tests for multiple authors, accented
+  author names, `et al.` author lists, DOI URL forms, misplaced DOIs, and
+  likely spelling errors in author names and titles.

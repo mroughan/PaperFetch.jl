@@ -55,6 +55,8 @@ function value_from_source(source::SourceRecord, field::AbstractString)
     return nothing
 end
 
+source_is_error(source::SourceRecord) = endswith(source.provider, "-error")
+
 function compare_value(field::String, input::Union{Nothing,String}, source::Union{Nothing,String})
     input  = nonempty(input)
     source = nonempty(source)
@@ -82,11 +84,28 @@ function compare_value(field::String, input::Union{Nothing,String}, source::Unio
         return FieldComparison(field, status, input, source, note)
     elseif field == "author"
         left, right = normalize_authors(input), normalize_authors(source)
-        # Use :conflict when names differ (not :ambiguous); :ambiguous is for truly
-        # undecidable cases, not clear disagreements.
-        status = left == right ? (input == source ? :exact : :equivalent) : :conflict
-        note   = left == right ? "authors are equivalent after name normalization" :
-                                 "author strings differ after normalization; manual review required"
+        input_truncated = occursin(r"(?i)\bet\.?\s+al\.?", input)
+        source_truncated = occursin(r"(?i)\bet\.?\s+al\.?", source)
+        status = if left == right
+            input == source ? :exact : :equivalent
+        elseif (input_truncated || source_truncated) &&
+                !isempty(left) && !isempty(right) &&
+                (occursin(first(split(left, ";")), right) || occursin(first(split(right, ";")), left))
+            :ambiguous
+        elseif near_match(left, right; max_ratio=0.22)
+            :ambiguous
+        else
+            :conflict
+        end
+        note = if status in (:exact, :equivalent)
+            "authors are equivalent after name normalization"
+        elseif status == :ambiguous && (input_truncated || source_truncated)
+            "author list appears truncated with et al.; manual review required"
+        elseif status == :ambiguous
+            "author strings are close but not identical; possible spelling difference"
+        else
+            "author strings differ after normalization; manual review required"
+        end
         return FieldComparison(field, status, input, source, note)
     else
         left, right = normalize_text(input), normalize_text(source)
@@ -96,11 +115,18 @@ function compare_value(field::String, input::Union{Nothing,String}, source::Unio
             :normalized
         elseif occursin(left, right) || occursin(right, left)
             :equivalent
+        elseif field == "title" && near_match(left, right; max_ratio=0.10)
+            :ambiguous
         else
             :conflict
         end
-        note = status == :conflict ? "normalized text differs" :
-                                     "text matches after accepted normalization"
+        note = if status == :conflict
+            "normalized text differs"
+        elseif status == :ambiguous
+            "normalized text is close but not identical; possible spelling difference"
+        else
+            "text matches after accepted normalization"
+        end
         return FieldComparison(field, status, input, source, note)
     end
 end
@@ -152,11 +178,19 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
             ["no source metadata found"], String[])
     end
 
-    best_source      = first(sources)
+    provider_errors = filter(source_is_error, sources)
+    usable_sources = filter(!source_is_error, sources)
+    if isempty(usable_sources)
+        notes = isempty(provider_errors) ? ["no source metadata found"] :
+            ["provider error: $(source.provider) $(get(source.raw, "error", ""))" for source in provider_errors]
+        return EntryReport(entry, sources, FieldComparison[], 0.0, notes, String[])
+    end
+
+    best_source      = first(usable_sources)
     best_comparisons = FieldComparison[]
     best_score       = -1.0
 
-    for source in sources
+    for source in usable_sources
         comparisons = FieldComparison[]
         for field in fields
             input_value  = get(entry.fields, field, nothing)
@@ -173,12 +207,15 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
     end
 
     notes = String["best source: $(best_source.provider) ($(source_identity(best_source)))"]
+    for source in provider_errors
+        push!(notes, "provider error: $(source.provider) $(get(source.raw, "error", ""))")
+    end
     for cmp in best_comparisons
         cmp.status in (:conflict, :ambiguous, :missing_input) &&
             push!(notes, "$(cmp.field): $(cmp.note)")
     end
     pdfs = String[]
-    for source in sources
+    for source in usable_sources
         source.pdf_url !== nothing && source.pdf_url ∉ pdfs && push!(pdfs, source.pdf_url)
     end
     return EntryReport(entry, sources, best_comparisons, max(best_score, 0.0), notes, pdfs)

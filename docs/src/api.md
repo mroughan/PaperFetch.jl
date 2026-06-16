@@ -8,6 +8,8 @@ CurrentModule = PaperFetch
 
 ```@docs
 BibEntry
+WorkIdentifier
+CandidateSource
 SourceRecord
 FieldComparison
 EntryReport
@@ -19,6 +21,7 @@ FetchResult
 ```@docs
 read_bibtex
 read_items
+extract_identifiers
 normalize_doi
 normalize_text
 ```
