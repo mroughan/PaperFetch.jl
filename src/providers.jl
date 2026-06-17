@@ -54,12 +54,14 @@ struct FixtureProvider <: AbstractProvider
     bydoi::Dict{String,Vector{SourceRecord}}
 end
 
-Base.@kwdef struct ApiProvider <: AbstractProvider
+Base.@kwdef mutable struct ApiProvider <: AbstractProvider
     email::String = "noreply@example.org"
     user_agent::String = DEFAULT_USER_AGENT
     get_json::Function = default_get_json
     get_text::Function = default_get_text
     cache_dir::Union{Nothing,String} = nothing
+    rate_limit_seconds::Float64 = 0.0
+    last_request_ns::Base.RefValue{UInt64} = Ref(UInt64(0))
 end
 
 struct CandidateProvider <: AbstractProvider end
@@ -80,19 +82,60 @@ function default_get_text(url::AbstractString; headers=Pair{String,String}[])
     return String(response.body)
 end
 
+function cache_key(url::AbstractString, headers)
+    parts = [String(url)]
+    for header in sort!(collect(headers); by=h -> lowercase(String(first(h))))
+        push!(parts, lowercase(String(first(header))) * ": " * String(last(header)))
+    end
+    return bytes2hex(sha256(join(parts, "\n")))
+end
+
+function atomic_write(path::AbstractString, data)
+    dir = dirname(path)
+    mkpath(dir)
+    tmp, io = mktemp(dir)
+    try
+        write(io, data)
+        close(io)
+        mv(tmp, path; force=true)
+    catch
+        isopen(io) && close(io)
+        isfile(tmp) && rm(tmp; force=true)
+        rethrow()
+    end
+    return path
+end
+
+function throttle!(provider::ApiProvider)
+    interval = provider.rate_limit_seconds
+    interval <= 0 && return nothing
+    last = provider.last_request_ns[]
+    if last != 0
+        elapsed = (time_ns() - last) / 1.0e9
+        delay = interval - elapsed
+        delay > 0 && sleep(delay)
+    end
+    provider.last_request_ns[] = time_ns()
+    return nothing
+end
+
 function provider_get_json(provider::ApiProvider, url::String; headers=Pair{String,String}[])
-    provider.cache_dir === nothing && return provider.get_json(url; headers)
-    key = bytes2hex(sha256(url))
+    if provider.cache_dir === nothing
+        throttle!(provider)
+        return provider.get_json(url; headers)
+    end
+    key = cache_key(url, headers)
     path = joinpath(provider.cache_dir, key * ".json")
     metapath = joinpath(provider.cache_dir, key * ".meta.json")
     if isfile(path)
         return JSON3.read(read(path, String))
     end
+    throttle!(provider)
     result = provider.get_json(url; headers)
-    mkpath(provider.cache_dir)
-    write(path, JSON3.write(result))
-    write(metapath, JSON3.write(Dict(
+    atomic_write(path, JSON3.write(result))
+    atomic_write(metapath, JSON3.write(Dict(
         "url" => url,
+        "headers" => Dict(String(first(h)) => String(last(h)) for h in headers),
         "cached_at" => string(Dates.now()),
         "format" => "json",
     )))
@@ -100,18 +143,22 @@ function provider_get_json(provider::ApiProvider, url::String; headers=Pair{Stri
 end
 
 function provider_get_text(provider::ApiProvider, url::String; headers=Pair{String,String}[])
-    provider.cache_dir === nothing && return provider.get_text(url; headers)
-    key = bytes2hex(sha256(url))
-    path = joinpath(provider.cache_dir, key * ".xml")
+    if provider.cache_dir === nothing
+        throttle!(provider)
+        return provider.get_text(url; headers)
+    end
+    key = cache_key(url, headers)
+    path = joinpath(provider.cache_dir, key * ".txt")
     metapath = joinpath(provider.cache_dir, key * ".meta.json")
     if isfile(path)
         return read(path, String)
     end
+    throttle!(provider)
     result = provider.get_text(url; headers)
-    mkpath(provider.cache_dir)
-    write(path, result)
-    write(metapath, JSON3.write(Dict(
+    atomic_write(path, result)
+    atomic_write(metapath, JSON3.write(Dict(
         "url" => url,
+        "headers" => Dict(String(first(h)) => String(last(h)) for h in headers),
         "cached_at" => string(Dates.now()),
         "format" => "text",
     )))
@@ -253,12 +300,24 @@ function sources_for(provider::ApiProvider, entry::BibEntry)
     return sources
 end
 
+function deduplicate_sources(sources::Vector{SourceRecord})
+    unique_sources = SourceRecord[]
+    seen = Set{String}()
+    for source in sources
+        key = source.provider * ":" * source_identity(source)
+        key in seen && continue
+        push!(seen, key)
+        push!(unique_sources, source)
+    end
+    return unique_sources
+end
+
 function provider_sources(providers, entry)
     sources = SourceRecord[]
     for provider in providers
         append!(sources, sources_for(provider, entry))
     end
-    return sources
+    return deduplicate_sources(sources)
 end
 
 # ─── API adapters ────────────────────────────────────────────────────────────

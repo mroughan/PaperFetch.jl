@@ -18,10 +18,16 @@ function parse_cli(args)
             help    = "Contact email for APIs"
             default = "noreply@example.org"
         "--use-apis"
-            help   = "Query Crossref, OpenAlex, Unpaywall, DataCite, and arXiv"
+            help   = "Query live scholarly APIs and URL landing pages"
             action = :store_true
         "--cache-dir"
             help = "Directory for caching API responses between runs"
+        "--rate-limit-seconds"
+            help    = "Minimum delay between uncached live API requests"
+            default = "0.05"
+        "--ignore-keys"
+            help    = "Comma-separated BibTeX keys to skip during checking"
+            default = "anon"
         "--cookie-file"
             help = "Optional local Netscape cookies.txt file for credential-assisted fetching"
         "--ezproxy"
@@ -45,16 +51,21 @@ function main(args=ARGS)
     options = parse_cli(args)
     mode    = options["mode"]
     if mode ∉ ("check", "fetch")
-        println(stderr, "Error: mode must be 'check' or 'fetch'")
-        exit(1)
+        throw(ArgumentError("mode must be 'check' or 'fetch'"))
+    end
+    rate_limit_seconds = parse(Float64, options["rate-limit-seconds"])
+    ignore_keys = let text = strip(options["ignore-keys"])
+        isempty(text) ? Set{String}() : Set(strip.(split(text, ",")))
     end
 
     reports = check_bibliography(options["input"];
-        fixture   = options["fixture"],
-        email     = options["email"],
-        use_apis  = options["use-apis"],
-        cache_dir = options["cache-dir"],
-        check     = :warn)
+        fixture            = options["fixture"],
+        email              = options["email"],
+        use_apis           = options["use-apis"],
+        cache_dir          = options["cache-dir"],
+        rate_limit_seconds = rate_limit_seconds,
+        ignore_keys        = ignore_keys,
+        check              = :warn)
     paths = write_reports(reports, options["outdir"])
     println("Wrote: $(paths[:markdown])")
     println("Wrote: $(paths[:inc])")

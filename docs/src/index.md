@@ -21,7 +21,8 @@ Pkg.instantiate()
 Run an offline check against the included fixture metadata:
 
 ```bash
-julia --project=. src/cli.jl check examples/01_exact_article.bib \
+julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
+  check examples/01_exact_article.bib \
   --fixture examples/metadata_fixture.json \
   --outdir paperfetch_out
 ```
@@ -71,6 +72,9 @@ failures.
 - DOI and similar identifiers use exact normalized comparison.
 - Titles, authors, pages, journal names, and other bibliographic text are
   compared with documented normalization.
+- URL normalization preserves path and query case while canonicalizing DOI
+  resolver links and HTTP(S) hosts.
+- Author order is treated as meaningful. Reordered author lists are marked for
+  manual review rather than accepted silently.
 - Network API use is opt-in.
 - Default tests and examples are offline and deterministic.
-

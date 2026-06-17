@@ -32,10 +32,11 @@ end
     @test PaperFetch.normalize_year("Published in 2020, online") == "2020"
     @test PaperFetch.normalize_year("no year here") == ""
 
-    @test PaperFetch.normalize_authors("Smith, J. and Doe, J.") ==
-          PaperFetch.normalize_authors("Doe, J. and Smith, J.")
+    @test PaperFetch.normalize_authors("Smith, J. and Doe, J.") == "j smith;j doe"
     @test PaperFetch.normalize_authors("García, Ana and Müller, Max") ==
-          PaperFetch.normalize_authors("Muller, Max and Garcia, Ana")
+          "ana garcia;max muller"
+    @test PaperFetch.normalize_authors_unordered("García, Ana and Müller, Max") ==
+          PaperFetch.normalize_authors_unordered("Muller, Max and Garcia, Ana")
     @test PaperFetch.normalize_authors("Smith, Jane et al.") ==
           PaperFetch.normalize_authors("Smith, Jane")
     @test PaperFetch.author_signatures_match("M. L. Fredman", "Michael L. Fredman")
@@ -76,8 +77,12 @@ end
     @test PaperFetch.normalize_url("https://example.org/page.") == "example.org/page"
     @test PaperFetch.normalize_url("https://example.org/page)") == "example.org/page"
 
-    # Case folding
+    # Host case folds, but path and query case are preserved.
     @test PaperFetch.normalize_url("HTTPS://Example.ORG/path") == "example.org/path"
+    @test PaperFetch.normalize_url("HTTPS://Example.ORG/Data/File.pdf?ID=ABC") ==
+          "example.org/Data/File.pdf?ID=ABC"
+    @test PaperFetch.normalize_url("HTTPS://Example.ORG/Data/File.pdf?ID=ABC") !=
+          PaperFetch.normalize_url("https://example.org/data/file.pdf?id=abc")
 
     # urls_in_text: plain URL
     urls1 = PaperFetch.urls_in_text("See https://example.org/paper for details")
@@ -182,9 +187,14 @@ end
     cmp = PaperFetch.compare_value("author", "Smith, J.", "Jones, A.")
     @test cmp.status == :conflict
 
-    # Matching (order-invariant) author strings should give :equivalent or :exact
+    # Matching author strings should give :equivalent or :exact when order is preserved.
+    cmp_same = PaperFetch.compare_value("author", "Jane Doe and John Smith", "Doe, Jane and Smith, John")
+    @test cmp_same.status in (:exact, :equivalent)
+
+    # Reordered authors are the same names but need manual review.
     cmp2 = PaperFetch.compare_value("author", "Jane Doe and John Smith", "John Smith and Jane Doe")
-    @test cmp2.status in (:exact, :equivalent)
+    @test cmp2.status == :ambiguous
+    @test occursin("order differs", cmp2.note)
 
     cmp3 = PaperFetch.compare_value("author", "García, Ana and Müller, Max", "Ana Garcia and Max Muller")
     @test cmp3.status in (:exact, :equivalent)
@@ -641,10 +651,13 @@ end
     @test PaperFetch.provider_get_json(provider, "https://cache.example/json").value == 42
     @test PaperFetch.provider_get_json(provider, "https://cache.example/json").value == 42
     @test json_calls[] == 1
+    @test PaperFetch.provider_get_json(provider, "https://cache.example/json";
+        headers=["Accept" => "application/json"]).value == 42
+    @test json_calls[] == 2
     @test PaperFetch.provider_get_text(provider, "https://cache.example/text") == "<ok />"
     @test PaperFetch.provider_get_text(provider, "https://cache.example/text") == "<ok />"
     @test text_calls[] == 1
-    @test length(filter(path -> endswith(path, ".meta.json"), readdir(cache))) == 2
+    @test length(filter(path -> endswith(path, ".meta.json"), readdir(cache))) == 3
 
     failing = PaperFetch.ApiProvider(
         get_json=(url; headers=Pair{String,String}[]) -> error("boom json"),
@@ -903,12 +916,16 @@ end
         "--email", "person@example.org",
         "--use-apis",
         "--cache-dir", ".cache",
+        "--rate-limit-seconds", "0.02",
+        "--ignore-keys", "anon,draft",
         "--cookie-file", "cookies.txt",
         "--ezproxy", "https://proxy.example/login?url={url}",
     ])
     @test parsed["mode"] == "fetch"
     @test parsed["use-apis"] == true
     @test parsed["cache-dir"] == ".cache"
+    @test parsed["rate-limit-seconds"] == "0.02"
+    @test parsed["ignore-keys"] == "anon,draft"
     @test parsed["cookie-file"] == "cookies.txt"
     @test parsed["ezproxy"] == "https://proxy.example/login?url={url}"
 end
@@ -936,12 +953,7 @@ end
     rows = collect(IncCSV.table(IncCSV.readinc(joinpath(outdir, "manifest.inc"))))
     @test rows[1].status == "skipped"
 
-    project = dirname(Base.active_project())
-    code = "using PaperFetch; PaperFetch.main([\"bad\", \"$(bib)\"])"
-    cmd = `$(Base.julia_cmd()) --project=$project -e $code`
-    proc = run(pipeline(cmd; stdout=devnull, stderr=devnull); wait=false)
-    wait(proc)
-    @test proc.exitcode == 1
+    @test_throws ArgumentError PaperFetch.main(["bad", bib])
 end
 
 @testset "anon key is skipped by check_bibliography" begin
@@ -954,4 +966,9 @@ end
     reports = check_bibliography(bib; check=:none)
     @test length(reports) == 1
     @test reports[1].entry.key == "real_key"
+    string_reports = check_bibliography(bib; check=:none, ignore_keys="anon")
+    @test length(string_reports) == 1
+    @test string_reports[1].entry.key == "real_key"
+    all_reports = check_bibliography(bib; check=:none, ignore_keys=nothing)
+    @test length(all_reports) == 2
 end

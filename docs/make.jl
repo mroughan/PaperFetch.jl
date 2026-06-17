@@ -19,6 +19,7 @@ makedocs(;
     pages = [
         "Home" => "index.md",
         "Examples" => "examples.md",
+        "Live Providers" => "providers.md",
         "Stand-Alone Executable" => "standalone.md",
         "API Reference" => "api.md",
     ],

@@ -85,6 +85,7 @@ PaperFetchCompiled/bin/paperfetch check references.bib \
   --email your.email@example.edu \
   --use-apis \
   --cache-dir paperfetch_cache \
+  --rate-limit-seconds 0.05 \
   --outdir paperfetch_out
 ```
 
@@ -94,6 +95,8 @@ Fetch mode works the same way:
 PaperFetchCompiled/bin/paperfetch fetch references.bib \
   --email your.email@example.edu \
   --use-apis \
+  --cache-dir paperfetch_cache \
+  --rate-limit-seconds 0.05 \
   --cookie-file cookies.txt \
   --ezproxy 'https://proxy.example.edu/login?url={url}' \
   --outdir paperfetch_out
@@ -122,6 +125,7 @@ PaperFetchCompiled/bin/paperfetch check references.bib \
   --email your.email@example.edu \
   --use-apis \
   --cache-dir /tmp/paperfetch_cache \
+  --rate-limit-seconds 0.05 \
   --outdir /tmp/paperfetch_live
 ```
 
@@ -170,11 +174,12 @@ Important operational details:
 - Build separately for each operating system and CPU family you want to support.
 - Do not bundle cookie files, library credentials, API keys, private cache
   directories, or downloaded PDFs.
-- Ask users to provide `--email`, `--cookie-file`, `--ezproxy`, and
-  `--cache-dir` at runtime.
+- Ask users to provide `--email`, `--cookie-file`, `--ezproxy`, `--cache-dir`,
+  `--rate-limit-seconds`, and `--ignore-keys` at runtime when those settings
+  matter for their institution or bibliography.
 - Test with `--use-apis` on the target network if the app is expected to query
   Crossref, OpenAlex, Unpaywall, DataCite, arXiv, Semantic Scholar, PubMed,
-  CORE, or Figshare.
+  CORE, Figshare, Open Library, Google Books, or URL landing pages.
 - Keep a deterministic fixture-backed smoke test in release notes so users can
   distinguish packaging failures from network/API failures.
 

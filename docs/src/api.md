@@ -23,6 +23,7 @@ read_bibtex
 read_items
 extract_identifiers
 normalize_doi
+normalize_url
 normalize_text
 ```
 

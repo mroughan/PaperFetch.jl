@@ -46,9 +46,10 @@ end
 Normalize a URL for tolerant comparison.
 
 DOI resolver URLs (`https://doi.org/10.x/y`, `https://dx.doi.org/10.x/y`) are
-canonicalized to `doi:<normalized-doi>`. Other URLs have their scheme stripped,
-trailing slashes removed, trailing punctuation (`.`, `)`) removed, and the
-result lowercased.
+canonicalized to `doi:<normalized-doi>`. Other HTTP(S) URLs have their scheme
+stripped, host lowercased, default port removed, and trailing slashes or
+punctuation removed. URL paths and queries keep their original case because many
+web servers treat those components as case-sensitive.
 
 # Example
 
@@ -56,6 +57,7 @@ result lowercased.
 normalize_url("https://doi.org/10.1000/ABC") == "doi:10.1000/abc"
 normalize_url("https://doi.org/10.1000/abc") == normalize_url("https://dx.doi.org/10.1000/ABC")
 normalize_url("https://example.org/") == "example.org"
+normalize_url("https://Example.org/Data/File.pdf?ID=ABC") == "example.org/Data/File.pdf?ID=ABC"
 ```
 """
 function normalize_url(value::AbstractString)
@@ -66,9 +68,17 @@ function normalize_url(value::AbstractString)
         capture = doi_match.captures[1]
         capture !== nothing && return "doi:" * normalize_doi(capture)
     end
-    text = replace(text, r"(?i)^https?://" => "")
-    text = replace(text, r"/+$" => "")
-    return lowercase(text)
+    url_match = match(r"(?i)^https?://([^/?#]+)(.*)$", text)
+    if url_match !== nothing
+        authority = url_match.captures[1]
+        suffix = something(url_match.captures[2], "")
+        authority !== nothing || return text
+        authority = lowercase(authority)
+        authority = replace(authority, r":(?:80|443)$" => "")
+        suffix = replace(suffix, r"/+$" => "")
+        return authority * suffix
+    end
+    return replace(text, r"/+$" => "")
 end
 
 """
@@ -133,13 +143,13 @@ end
 
 Normalize an author string for tolerant comparison.
 
-Splits on ` and ` or ` & `, normalizes each name, sorts alphabetically,
-and joins with `;`. Order-invariant.
+Splits on ` and ` or ` & `, normalizes each name, and joins with `;`. Author
+order is preserved because it is bibliographically meaningful.
 
 # Example
 
 ```julia
-normalize_authors("Smith, J. and Doe, J.") == normalize_authors("Doe, J. and Smith, J.")
+normalize_authors("Smith, J. and Doe, J.") == "j smith;j doe"
 ```
 """
 function normalize_author_part(value::AbstractString)
@@ -155,6 +165,12 @@ function normalize_authors(value::AbstractString)
     value = replace(value, r"(?i)\bet\.?\s+al\.?" => "")
     parts = split(value, r"\s+(?:and|&)\s+"i)
     clean = normalize_author_part.(parts)
+    filter!(!isempty, clean)
+    return join(clean, ";")
+end
+
+function normalize_authors_unordered(value::AbstractString)
+    clean = split(normalize_authors(value), ";")
     sort!(filter!(!isempty, clean))
     return join(clean, ";")
 end
@@ -182,7 +198,11 @@ function normalized_author_signatures(value::AbstractString)
     value = replace(value, r"(?i)\bet\.?\s+al\.?" => "")
     parts = split(value, r"\s+(?:and|&)\s+"i)
     sigs = filter(!isnothing, normalized_author_signature_part.(parts))
-    return sort!(collect(sigs), by=s -> (s.surname, s.initials))
+    return collect(sigs)
+end
+
+function normalized_author_signatures_unordered(value::AbstractString)
+    return sort!(normalized_author_signatures(value), by=s -> (s.surname, s.initials))
 end
 
 function compatible_initials(left::AbstractString, right::AbstractString)
@@ -200,8 +220,19 @@ function author_signatures_match(left::AbstractString, right::AbstractString)
     return true
 end
 
+function author_signatures_match_unordered(left::AbstractString, right::AbstractString)
+    a = normalized_author_signatures_unordered(left)
+    b = normalized_author_signatures_unordered(right)
+    (isempty(a) || isempty(b) || length(a) != length(b)) && return false
+    for (x, y) in zip(a, b)
+        x.surname == y.surname || return false
+        compatible_initials(x.initials, y.initials) || return false
+    end
+    return true
+end
+
 function author_surnames(value::AbstractString)
-    sigs = normalized_author_signatures(value)
+    sigs = normalized_author_signatures_unordered(value)
     return unique([sig.surname for sig in sigs if !isempty(sig.surname)])
 end
 

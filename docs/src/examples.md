@@ -6,7 +6,8 @@ suite. They are intended to show the main cases PaperFetch.jl should handle.
 ## Exact Article
 
 ```bash
-julia --project=. src/cli.jl check examples/01_exact_article.bib \
+julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
+  check examples/01_exact_article.bib \
   --fixture examples/metadata_fixture.json \
   --outdir paperfetch_out
 ```
@@ -24,7 +25,8 @@ are not byte-for-byte identical:
 Run one with:
 
 ```bash
-julia --project=. src/cli.jl check examples/03_latex_accents.bib \
+julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
+  check examples/03_latex_accents.bib \
   --fixture examples/metadata_fixture.json \
   --outdir paperfetch_out
 ```
@@ -57,7 +59,8 @@ a bibliography error.
 Plain text input is also accepted:
 
 ```bash
-julia --project=. src/cli.jl check examples/11_plain_dois.txt \
+julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
+  check examples/11_plain_dois.txt \
   --fixture examples/metadata_fixture.json \
   --outdir paperfetch_out
 ```
@@ -69,14 +72,17 @@ Each non-comment line is interpreted as a DOI, URL, or title-like item.
 Live API mode is opt-in:
 
 ```bash
-julia --project=. src/cli.jl check references.bib \
+julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
+  check references.bib \
   --email your.email@example.edu \
   --use-apis \
+  --cache-dir .paperfetch_cache \
   --outdir paperfetch_out
 ```
 
-The current live adapter queries Crossref, OpenAlex, and Unpaywall for
-DOI-backed entries. API behavior can change, so fixture-backed checks remain
+The live adapter can query Crossref, OpenAlex, Unpaywall, DataCite, arXiv,
+Semantic Scholar, PubMed, CORE, Figshare, Open Library, Google Books, and URL
+landing-page metadata. API behavior can change, so fixture-backed checks remain
 the preferred path for deterministic tests and repeated review.
 
 ## Manual Online Field Tests

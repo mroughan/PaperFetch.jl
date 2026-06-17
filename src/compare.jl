@@ -174,12 +174,15 @@ function compare_value(field::String, input::Union{Nothing,String}, source::Unio
         return FieldComparison(field, status, input, source, note)
     elseif field == "author"
         left, right = normalize_authors(input), normalize_authors(source)
+        left_unordered, right_unordered = normalize_authors_unordered(input), normalize_authors_unordered(source)
         input_truncated = occursin(r"(?i)\bet\.?\s+al\.?", input)
         source_truncated = occursin(r"(?i)\bet\.?\s+al\.?", source)
         status = if left == right
             input == source ? :exact : :equivalent
         elseif author_signatures_match(input, source)
             :equivalent
+        elseif left_unordered == right_unordered || author_signatures_match_unordered(input, source)
+            :ambiguous
         elseif (input_truncated || source_truncated) &&
                 !isempty(left) && !isempty(right) &&
                 (occursin(first(split(left, ";")), right) || occursin(first(split(right, ";")), left))
@@ -191,6 +194,9 @@ function compare_value(field::String, input::Union{Nothing,String}, source::Unio
         end
         note = if status in (:exact, :equivalent)
             "authors are equivalent after name normalization"
+        elseif status == :ambiguous &&
+                (left_unordered == right_unordered || author_signatures_match_unordered(input, source))
+            "author names match but order differs; manual review required"
         elseif status == :ambiguous && (input_truncated || source_truncated)
             "author list appears truncated with et al.; manual review required"
         elseif status == :ambiguous

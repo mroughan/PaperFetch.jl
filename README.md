@@ -28,7 +28,8 @@ or separate AI-assisted editing task can improve the bibliography deliberately.
   CORE, Figshare, Open Library, Google Books, and URL landing-page metadata.
 - Compares bibliography fields with cautious normalization for title case,
   page ranges, Unicode/LaTeX accents, DOI URL variants, author initials, and
-  similar harmless differences.
+  similar harmless differences. URL paths and queries keep their case, and
+  reordered author lists are flagged for review rather than silently accepted.
 - Writes Markdown and INC reports; INC is a spreadsheet-friendly CSV-like format
   handled by IncCSV.jl.
 - Optionally downloads PDFs from explicit PDF candidate URLs and writes a fetch
@@ -90,11 +91,14 @@ julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
   --email your.email@example.edu \
   --use-apis \
   --cache-dir .paperfetch_cache \
+  --rate-limit-seconds 0.05 \
   --outdir paperfetch_out
 ```
 
 Use a real contact email for scholarly APIs. `--cache-dir` keeps repeat runs
-faster and gentler on providers.
+faster and gentler on providers. `--rate-limit-seconds` is a light per-run
+throttle between uncached live requests; increase it if a provider asks you to
+slow down.
 
 ## Fetch PDFs
 
@@ -107,6 +111,7 @@ julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
   --email your.email@example.edu \
   --use-apis \
   --cache-dir .paperfetch_cache \
+  --rate-limit-seconds 0.05 \
   --outdir paperfetch_out
 ```
 
@@ -139,6 +144,7 @@ julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
   --email your.email@example.edu \
   --use-apis \
   --cache-dir .paperfetch_cache \
+  --rate-limit-seconds 0.05 \
   --ezproxy 'https://proxy.example.edu/login?url={url}' \
   --cookie-file /path/to/cookies.txt \
   --outdir paperfetch_out
@@ -153,9 +159,10 @@ Check your library and publisher terms before downloading.
 using PaperFetch
 
 reports = check_bibliography("references.bib";
-    email     = "you@example.edu",
-    use_apis  = true,
-    cache_dir = ".paperfetch_cache",
+    email              = "you@example.edu",
+    use_apis           = true,
+    cache_dir          = ".paperfetch_cache",
+    rate_limit_seconds = 0.05,
 )
 
 paths = write_reports(reports, "paperfetch_out")
@@ -173,6 +180,10 @@ reports = check_bibliography("examples/01_exact_article.bib";
     check = :none,
 )
 ```
+
+`check_bibliography` skips the key `anon` by default because that key is often
+used for anonymized review placeholders. Pass `ignore_keys=nothing` to keep every
+entry, or provide a custom set/list of keys to skip.
 
 ## Examples And Tests
 
@@ -198,7 +209,7 @@ julia --project=. test/online/runtests.jl
 ## Documentation
 
 The documentation includes a quickstart, examples, API reference, and notes on
-building a stand-alone executable:
+live providers, caching, rate limiting, and building a stand-alone executable:
 
 https://mroughan.github.io/PaperFetch.jl/dev
 

@@ -77,7 +77,17 @@ function download_pdf(url::String, dest::String; cookies::Dict{String,String}=Di
     elseif !looks_pdf
         return false, actual, "not a PDF; content-type=$(ctype)", nothing, length(body)
     end
-    write(dest, body)
+    mkpath(dirname(dest))
+    tmp, io = mktemp(dirname(dest))
+    try
+        write(io, body)
+        close(io)
+        mv(tmp, dest; force=true)
+    catch
+        isopen(io) && close(io)
+        isfile(tmp) && rm(tmp; force=true)
+        rethrow()
+    end
     return true, actual, "downloaded", bytes2hex(sha256(body)), length(body)
 end
 
