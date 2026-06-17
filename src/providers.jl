@@ -120,13 +120,14 @@ function throttle!(provider::ApiProvider)
 end
 
 function provider_get_json(provider::ApiProvider, url::String; headers=Pair{String,String}[])
-    if provider.cache_dir === nothing
+    cache_dir = provider.cache_dir
+    if cache_dir === nothing
         throttle!(provider)
         return provider.get_json(url; headers)
     end
     key = cache_key(url, headers)
-    path = joinpath(provider.cache_dir, key * ".json")
-    metapath = joinpath(provider.cache_dir, key * ".meta.json")
+    path = joinpath(cache_dir, key * ".json")
+    metapath = joinpath(cache_dir, key * ".meta.json")
     if isfile(path)
         return JSON3.read(read(path, String))
     end
@@ -143,13 +144,14 @@ function provider_get_json(provider::ApiProvider, url::String; headers=Pair{Stri
 end
 
 function provider_get_text(provider::ApiProvider, url::String; headers=Pair{String,String}[])
-    if provider.cache_dir === nothing
+    cache_dir = provider.cache_dir
+    if cache_dir === nothing
         throttle!(provider)
         return provider.get_text(url; headers)
     end
     key = cache_key(url, headers)
-    path = joinpath(provider.cache_dir, key * ".txt")
-    metapath = joinpath(provider.cache_dir, key * ".meta.json")
+    path = joinpath(cache_dir, key * ".txt")
+    metapath = joinpath(cache_dir, key * ".meta.json")
     if isfile(path)
         return read(path, String)
     end

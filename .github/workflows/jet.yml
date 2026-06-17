@@ -25,6 +25,8 @@ jobs:
       - uses: julia-actions/julia-buildpkg@v1
 
       - name: Run JET
+        env:
+          JULIA_REVISE: "off"
         run: |
           julia -e '
             using Pkg
