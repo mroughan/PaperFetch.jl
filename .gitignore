@@ -14,6 +14,11 @@ paperfetch_online_out/
 downloads/
 sourcecheck/
 docs/build/
+**/paperfetch_out/
+**/paperfetch_online_out/
+**/.paperfetch_cache/
+**/downloads/
+**/sourcecheck/
 
 Manifest.toml
 Manifest.toml.tmp

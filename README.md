@@ -1,7 +1,7 @@
 # PaperFetch.jl
 
 [![CI](https://github.com/mroughan/PaperFetch.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/mroughan/PaperFetch.jl/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/mroughan/PaperFetch.jl/branch/main/graph/badge.svg?token=kB2yzGMO9c)](https://codecov.io/gh/mroughan/PaperFetch.jl)
+[![codecov](https://codecov.io/gh/mroughan/PaperFetch.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/mroughan/PaperFetch.jl)
 [![JET](https://github.com/mroughan/PaperFetch.jl/actions/workflows/jet.yml/badge.svg)](https://github.com/mroughan/PaperFetch.jl/actions/workflows/jet.yml)
 [![Aqua](https://github.com/mroughan/PaperFetch.jl/actions/workflows/aqua.yml/badge.svg)](https://github.com/mroughan/PaperFetch.jl/actions/workflows/aqua.yml)
 [![Documentation](https://github.com/mroughan/PaperFetch.jl/actions/workflows/documenter.yml/badge.svg)](https://github.com/mroughan/PaperFetch.jl/actions/workflows/documenter.yml)
@@ -9,48 +9,61 @@
 [![Documentation Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://mroughan.github.io/PaperFetch.jl/dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-PaperFetch.jl helps validate and improve BibTeX bibliographies by checking
-entries against source metadata and writing review reports. It does not edit
-the input `.bib` file.
+PaperFetch.jl helps validate BibTeX bibliographies by checking entries against
+source metadata and writing human-readable review reports. It is designed for
+small and medium bibliography checks, usually 10-100 references, where traceable
+evidence matters more than bulk harvesting.
 
-The package is designed for small and medium bibliography checks, typically
-10-100 references, where traceable evidence and human review matter more than
-bulk throughput.
+PaperFetch.jl does not edit your `.bib` file. It reports what looks correct,
+what looks suspicious, and what source metadata it found so that a person, script,
+or separate AI-assisted editing task can improve the bibliography deliberately.
 
-## What It Does
+## What PaperFetch Does
 
-- Parses BibTeX with BibParser.jl.
-- Extracts normalized identifiers (DOI, arXiv ID, ISBN, URL) from each entry.
-- Compares entries against source metadata from fixtures or optional APIs
-  (Crossref, OpenAlex, Unpaywall, DataCite, arXiv).
-- Treats normalized bibliographic differences carefully, for example title
-  case, page dash style, Unicode and LaTeX accents, and author formatting.
-- Requires exact normalized matches for identifiers such as DOI.
-- Caches API responses to a local directory for repeat runs.
-- Writes a Markdown review report and an INC report using IncCSV.jl.
-- Optionally downloads PDFs from explicit PDF candidate URLs and writes an INC
+- Parses BibTeX with BibParser.jl, plus simple plain-text DOI/URL lists.
+- Extracts identifiers from normal and misplaced fields, including DOI, arXiv,
+  PMID, ISBN, and URL values found in fields such as `note` and `howpublished`.
+- Looks up metadata from deterministic fixtures or optional online providers:
+  Crossref, OpenAlex, Unpaywall, DataCite, arXiv, Semantic Scholar, PubMed,
+  CORE, Figshare, Open Library, Google Books, and URL landing-page metadata.
+- Compares bibliography fields with cautious normalization for title case,
+  page ranges, Unicode/LaTeX accents, DOI URL variants, author initials, and
+  similar harmless differences.
+- Writes Markdown and INC reports; INC is a spreadsheet-friendly CSV-like format
+  handled by IncCSV.jl.
+- Optionally downloads PDFs from explicit PDF candidate URLs and writes a fetch
   manifest.
 
-## Install
+## What PaperFetch Does Not Do
+
+- It does not rewrite or auto-correct the input BibTeX file.
+- It does not ask for, store, or manage library passwords.
+- It does not scrape publisher pages when a suitable API or landing-page metadata
+  route is available.
+- It does not treat every provider disagreement as truth. Reports are evidence
+  for review, not automatic authority.
+
+## Installation
+
+PaperFetch.jl currently targets Julia 1.11 or newer. Until the package is
+registered, install it from the repository:
 
 ```julia
 using Pkg
-Pkg.activate(".")
-Pkg.instantiate()
+Pkg.add(url="https://github.com/mroughan/PaperFetch.jl")
 ```
 
-## Run The Tests
+For development from a local checkout:
 
 ```bash
-julia --project=. -e 'using Pkg; Pkg.test()'
+git clone https://github.com/mroughan/PaperFetch.jl.git
+cd PaperFetch.jl
+julia --project=. -e 'using Pkg; Pkg.instantiate()'
 ```
 
-The default tests are offline. They use the small examples and fixture metadata
-in `examples/`.
+## Quickstart
 
-## Check A Bibliography
-
-Offline deterministic check using fixture metadata:
+Run a deterministic offline check with the included example fixture:
 
 ```bash
 julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
@@ -59,12 +72,17 @@ julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
   --outdir paperfetch_out
 ```
 
-Outputs:
+This writes:
 
 - `paperfetch_out/paperfetch_report.md`
 - `paperfetch_out/paperfetch_report.inc`
 
-Live API mode is opt-in. Responses are cached in `--cache-dir` for repeat runs:
+The Markdown report is meant for direct reading. The INC report is meant for
+spreadsheets and downstream tooling.
+
+## Live API Checks
+
+Live provider lookup is opt-in:
 
 ```bash
 julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
@@ -75,35 +93,39 @@ julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
   --outdir paperfetch_out
 ```
 
-The API adapter queries Crossref, OpenAlex, Unpaywall, DataCite, and arXiv
-for entries with matching identifiers.
+Use a real contact email for scholarly APIs. `--cache-dir` keeps repeat runs
+faster and gentler on providers.
 
 ## Fetch PDFs
 
-Fetch mode first performs the bibliography check, then downloads only explicit
-PDF candidate URLs found in source metadata:
+Fetch mode first checks the bibliography, then downloads only explicit PDF
+candidate URLs discovered in source metadata:
 
 ```bash
 julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
-  fetch examples/01_exact_article.bib \
-  --fixture examples/metadata_fixture.json \
+  fetch references.bib \
+  --email your.email@example.edu \
+  --use-apis \
+  --cache-dir .paperfetch_cache \
   --outdir paperfetch_out
 ```
 
 Outputs include:
 
+- `paperfetch_out/paperfetch_report.md`
+- `paperfetch_out/paperfetch_report.inc`
 - `paperfetch_out/manifest.inc`
-- downloaded `*.pdf` files when a candidate URL is available and reachable
+- downloaded `*.pdf` files when candidate URLs are available and reachable
 
-Entries without PDF candidates are recorded as `skipped`, not treated as
-validation failures.
+Entries without PDF candidates are recorded as `skipped`, not as validation
+failures.
 
-## Controlled Local Credential Use
+## Credential-Assisted Fetching
 
-Credential-assisted fetching is opt-in and local-first. PaperFetch.jl never
-asks for or stores passwords.
+Credential-assisted fetching is local and opt-in. PaperFetch.jl never asks for
+your username or password.
 
-Supported inputs:
+Supported runtime inputs:
 
 - an EZproxy URL template, for example
   `https://proxy.example.edu/login?url={url}`;
@@ -116,53 +138,56 @@ julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
   fetch references.bib \
   --email your.email@example.edu \
   --use-apis \
-  --outdir paperfetch_out \
+  --cache-dir .paperfetch_cache \
   --ezproxy 'https://proxy.example.edu/login?url={url}' \
-  --cookie-file /path/to/cookies.txt
+  --cookie-file /path/to/cookies.txt \
+  --outdir paperfetch_out
 ```
 
-Treat cookie files as login tokens. Do not upload or share them.
+Treat cookie files as login tokens. Do not commit, upload, email, or share them.
+Check your library and publisher terms before downloading.
 
-## PaperFetch Julia API
+## Julia API
 
 ```julia
 using PaperFetch
 
-# Offline check with a fixture file
-reports = check_bibliography("references.bib";
-    fixture = "examples/metadata_fixture.json")
-
-# Live API check with caching
 reports = check_bibliography("references.bib";
     email     = "you@example.edu",
     use_apis  = true,
-    cache_dir = ".paperfetch_cache")
+    cache_dir = ".paperfetch_cache",
+)
 
-# Write reports
-write_reports(reports, "paperfetch_out")
+paths = write_reports(reports, "paperfetch_out")
+paths[:markdown]
+paths[:inc]
 
-# Fetch PDFs
-fetch_pdfs(reports, "paperfetch_out")
+results, manifest = fetch_pdfs(reports, "paperfetch_out")
 ```
 
-## Examples
+For deterministic offline runs, pass a fixture instead of live APIs:
 
-The `examples/` directory contains small cases used by the test suite:
+```julia
+reports = check_bibliography("examples/01_exact_article.bib";
+    fixture = "examples/metadata_fixture.json",
+    check = :none,
+)
+```
 
-- exact article metadata;
-- title case and page-range normalization;
-- LaTeX accent normalization;
-- missing DOI;
-- conflicting DOI;
-- online documentation;
-- dataset reference;
-- arXiv-style preprint;
-- book chapter;
-- online report without a PDF;
-- plain DOI list input.
+## Examples And Tests
 
-Manual online field-test examples live in `examples/online/`. They use real
-DOI-backed open-access articles and are not run by default:
+The `examples/` directory contains small cases used by the test suite, covering
+exact metadata, normalized text differences, missing/conflicting DOI fields,
+web references, datasets, arXiv preprints, book chapters, online reports, and
+plain DOI lists.
+
+Run the default offline tests:
+
+```bash
+julia --project=. -e 'using Pkg; Pkg.test()'
+```
+
+Manual online field tests live in `examples/online/` and are not run by default:
 
 ```bash
 PAPERFETCH_ONLINE=true \
@@ -170,18 +195,45 @@ PAPERFETCH_EMAIL=your.email@example.edu \
 julia --project=. test/online/runtests.jl
 ```
 
-## Security And Policy Notes
+## Documentation
 
-- Do not put usernames or passwords in command-line arguments.
-- Keep cookie files local and private.
-- Check library and publisher terms before downloading.
-- Use small batches and polite API behavior.
-- Retrieve only material you are entitled to access.
+The documentation includes a quickstart, examples, API reference, and notes on
+building a stand-alone executable:
 
-## Disclosure
+https://mroughan.github.io/PaperFetch.jl/dev
+
+Build docs locally with:
+
+```bash
+julia --project=docs -e '
+  using Pkg
+  Pkg.develop(PackageSpec(path=pwd()))
+  Pkg.instantiate()
+'
+julia --project=docs docs/make.jl
+```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, test expectations,
+provider guidelines, and pull request notes.
+
+## Security
+
+See [SECURITY.md](SECURITY.md). In short:
+
+- do not put usernames or passwords in command-line arguments;
+- keep cookie files local and private;
+- do not commit API caches, downloaded PDFs, or private bibliographies;
+- retrieve only material you are entitled to access.
+
+## Citation
+
+If PaperFetch.jl helps your work, please cite it using the metadata in
+[CITATION.cff](CITATION.cff).
+
+## AI Disclosure
 
 This project has been built with help from AI coding agents. The package
-structure and initial implementation were created by AI agents including Codex
-(GPT-5) and Claude (claude-sonnet-4-6, Anthropic). Other AI agents may also
-have contributed to the code. All AI contributions were made under user
-supervision with user-provided architecture and guardrail instructions.
+structure and implementation were developed under user supervision with
+user-provided architecture and guardrail instructions.

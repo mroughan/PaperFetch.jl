@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+message: "If PaperFetch.jl helps your work, please cite it using this metadata."
+title: "PaperFetch.jl: Bibliography validation against source metadata"
+type: software
+authors:
+  - family-names: Roughan
+    given-names: Matthew
+license: MIT
+repository-code: "https://github.com/mroughan/PaperFetch.jl"
+url: "https://mroughan.github.io/PaperFetch.jl/dev"
+version: "0.2.0"
+abstract: >-
+  PaperFetch.jl validates BibTeX bibliographies against source metadata,
+  produces human-readable reports, and can optionally fetch accessible PDFs
+  from explicit candidate URLs.
