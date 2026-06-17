@@ -4,6 +4,7 @@
 [![codecov](https://codecov.io/gh/mroughan/PaperFetch.jl/branch/main/graph/badge.svg?token=kB2yzGMO9c)](https://codecov.io/gh/mroughan/PaperFetch.jl)
 [![JET](https://github.com/mroughan/PaperFetch.jl/actions/workflows/jet.yml/badge.svg)](https://github.com/mroughan/PaperFetch.jl/actions/workflows/jet.yml)
 [![Aqua](https://github.com/mroughan/PaperFetch.jl/actions/workflows/aqua.yml/badge.svg)](https://github.com/mroughan/PaperFetch.jl/actions/workflows/aqua.yml)
+[![Documentation](https://github.com/mroughan/PaperFetch.jl/actions/workflows/documenter.yml/badge.svg)](https://github.com/mroughan/PaperFetch.jl/actions/workflows/documenter.yml)
 [![Documentation Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://mroughan.github.io/PaperFetch.jl/stable)
 [![Documentation Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://mroughan.github.io/PaperFetch.jl/dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -122,7 +123,7 @@ julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
 
 Treat cookie files as login tokens. Do not upload or share them.
 
-## Julia API
+## PaperFetch Julia API
 
 ```julia
 using PaperFetch

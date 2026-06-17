@@ -395,6 +395,15 @@ function datacite_records(provider::ApiProvider, doi::AbstractString)
     end
 end
 
+function arxiv_year_from_xml(content::AbstractString)
+    for tag in ("updated", "published")
+        m = match(Regex("<$(tag)>(\\d{4})"), content)
+        capture = m === nothing ? nothing : m.captures[1]
+        capture !== nothing && return String(capture)
+    end
+    return nothing
+end
+
 function arxiv_records(provider::ApiProvider, arxiv_id::AbstractString)
     base_id = replace(strip(arxiv_id), r"v\d+$" => "")
     url = "https://export.arxiv.org/api/query?id_list=$(escapeuri(base_id))"
@@ -403,12 +412,14 @@ function arxiv_records(provider::ApiProvider, arxiv_id::AbstractString)
         body = provider_get_text(provider, url; headers)
         # Extract entry-level title (skip the feed <title> by anchoring to <entry>)
         title = let m = match(r"<entry>.*?<title[^>]*>(.*?)</title>"s, body)
-            m !== nothing ? strip(m[1]) : nothing
+            capture = m === nothing ? nothing : m.captures[1]
+            capture === nothing ? nothing : strip(capture)
         end
         authors = [strip(m.match) for m in eachmatch(r"(?<=<name>)[^<]+", body)]
-        year = let m = match(r"<published>(\d{4})", body); m !== nothing ? m[1] : nothing end
+        year = arxiv_year_from_xml(body)
         raw_doi = let m = match(r"<arxiv:doi[^>]*>([^<]+)</arxiv:doi>", body)
-            m !== nothing ? normalize_doi(m[1]) : nothing
+            capture = m === nothing ? nothing : m.captures[1]
+            capture === nothing ? nothing : normalize_doi(capture)
         end
         pdf_url = "https://arxiv.org/pdf/$(base_id)"
         abs_url = "https://arxiv.org/abs/$(base_id)"
@@ -540,9 +551,7 @@ function arxiv_search_records(provider::ApiProvider, entry::BibEntry)
             title_capture = title_match === nothing ? nothing : title_match.captures[1]
             title2 = title_capture === nothing ? nothing : replace(strip(title_capture), r"\s+" => " ")
             authors = [strip(x.match) for x in eachmatch(r"(?<=<name>)[^<]+", chunk)]
-            year_match = match(r"<published>(\d{4})", chunk)
-            year_capture = year_match === nothing ? nothing : year_match.captures[1]
-            year = year_capture === nothing ? nothing : String(year_capture)
+            year = arxiv_year_from_xml(chunk)
             isempty(id) && continue
             push!(records, SourceRecord(provider="arxiv-search", id=id, title=title2,
                 authors=authors, year=year, url="https://arxiv.org/abs/$(id)",

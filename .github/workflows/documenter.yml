@@ -5,6 +5,7 @@ on:
     branches: [main]
     tags: ['*']
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -19,6 +20,8 @@ jobs:
       statuses: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: julia-actions/setup-julia@v2
         with:

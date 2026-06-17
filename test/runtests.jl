@@ -88,6 +88,18 @@ end
         "https://dx.doi.org/10.1000/ABC",
         "https://doi.org/10.1000/abc")
     @test url_cmp.status == :normalized
+
+    note_url_entry = BibEntry("note_url_compare", "misc", Dict(
+        "title" => "Archived report",
+        "note" => raw"Archived at \url{https://example.org/report.pdf}.",
+    ))
+    note_url_source = SourceRecord(provider="fixture",
+        title="Archived report",
+        url="https://example.org/report.pdf")
+    note_url_report = compare_entry(note_url_entry, [note_url_source])
+    note_url_cmp = only(filter(cmp -> cmp.field == "url", note_url_report.comparisons))
+    @test note_url_cmp.status == :exact
+    @test note_url_cmp.input == "https://example.org/report.pdf"
 end
 
 @testset "BibTeX and plain input" begin
@@ -368,6 +380,32 @@ end
     title_sources = PaperFetch.sources_for(provider, title_entry)
     @test any(source -> source.provider == "semantic-scholar-search" &&
         source.doi == "10.2222/title", title_sources)
+end
+
+@testset "arXiv current version year" begin
+    xml = """
+    <feed>
+      <entry>
+        <id>http://arxiv.org/abs/math/0410026v2</id>
+        <updated>2005-09-30T12:43:02Z</updated>
+        <published>2004-10-01T18:04:00Z</published>
+        <title>An Introduction to Conway's Games and Numbers</title>
+        <author><name>Dierk Schleicher</name></author>
+        <author><name>Michael Stoll</name></author>
+      </entry>
+    </feed>
+    """
+    provider = PaperFetch.ApiProvider(
+        get_text=(url; headers=Pair{String,String}[]) -> xml,
+        get_json=(url; headers=Pair{String,String}[]) -> JSON3.read("{}"))
+    records = PaperFetch.arxiv_records(provider, "math/0410026v2")
+    @test only(records).year == "2005"
+
+    entry = BibEntry("schleicher2005introduction", "misc", Dict(
+        "title" => "An Introduction to Conway's Games and Numbers",
+    ))
+    search_records = PaperFetch.arxiv_search_records(provider, entry)
+    @test only(search_records).year == "2005"
 end
 
 @testset "source selection rejects hard mismatches" begin

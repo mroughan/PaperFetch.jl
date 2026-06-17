@@ -127,6 +127,19 @@ function value_from_source(source::SourceRecord, field::AbstractString)
     return nothing
 end
 
+function value_from_entry(entry::BibEntry, field::AbstractString)
+    field != "url" && return get(entry.fields, String(field), nothing)
+    explicit = get(entry.fields, "url", nothing)
+    explicit !== nothing && return explicit
+    for fallback in ("note", "howpublished")
+        text = get(entry.fields, fallback, nothing)
+        text === nothing && continue
+        urls = urls_in_text(text)
+        isempty(urls) || return first(urls)
+    end
+    return nothing
+end
+
 source_is_error(source::SourceRecord) = endswith(source.provider, "-error")
 
 function compare_value(field::String, input::Union{Nothing,String}, source::Union{Nothing,String})
@@ -296,7 +309,7 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
     for source in usable_sources
         comparisons = FieldComparison[]
         for field in fields
-            input_value  = get(entry.fields, field, nothing)
+            input_value  = value_from_entry(entry, field)
             source_value = value_from_source(source, field)
             input_value === nothing && source_value === nothing && continue
             push!(comparisons, compare_value(field, input_value, source_value))
