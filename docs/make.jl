@@ -12,6 +12,7 @@ makedocs(
     pages = [
         "Home" => "index.md",
         "Examples" => "examples.md",
+        "Stand-Alone Executable" => "standalone.md",
         "API Reference" => "api.md",
     ],
     checkdocs = :exports,

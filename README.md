@@ -7,7 +7,7 @@
 [![Documentation](https://github.com/mroughan/PaperFetch.jl/actions/workflows/documenter.yml/badge.svg)](https://github.com/mroughan/PaperFetch.jl/actions/workflows/documenter.yml)
 [![Documentation Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://mroughan.github.io/PaperFetch.jl/stable)
 [![Documentation Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://mroughan.github.io/PaperFetch.jl/dev)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 PaperFetch.jl helps validate and improve BibTeX bibliographies by checking
 entries against source metadata and writing review reports. It does not edit
