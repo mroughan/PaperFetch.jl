@@ -10,6 +10,7 @@
 
 paperfetch_out/
 paperfetch_online_out/
+.paperfetch_cache/
 downloads/
 sourcecheck/
 docs/build/

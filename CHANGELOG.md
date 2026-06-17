@@ -17,6 +17,12 @@
 - Added DataCite API adapter for dataset and software DOIs.
 - Added arXiv API adapter (Atom XML) for preprints with `eprint`/`archivePrefix`
   fields.
+- Added title/author fallback searches for DOI-less entries using Crossref,
+  OpenAlex, and arXiv.
+- Added book lookup paths through Open Library and Google Books, including ISBN
+  lookup where an ISBN is present.
+- Added URL metadata inspection for `url`, `note`, and `howpublished` links,
+  including direct PDF URL detection and citation meta-tag extraction.
 
 ### Caching
 - Added `cache_dir` parameter to `ApiProvider` and `check_bibliography`;
@@ -24,6 +30,16 @@
   repeat runs without re-querying providers.
 
 ### Bug fixes
+- Fixed DOI extraction from LaTeX `\url{...}` wrappers in misplaced fields
+  such as `note`.
+- Fixed `sources_for(::ApiProvider, ...)` so entries with a DOI hidden in
+  `note` or `url` still use the DOI-backed API path.
+- Fixed Open Library ISBN records to store ISBN provenance in `raw` rather than
+  passing a non-existent `isbn` field to `SourceRecord`.
+- Fixed title/author fallback query construction for entries with empty author
+  lists.
+- Fixed report generation to preserve actual BibTeX keys, including underscores,
+  in Markdown and INC output.
 - Fixed `openalex_records`: `url` field now records the landing-page URL,
   not a copy of the DOI string.
 - Fixed `read_bibtex`: entries are now sorted by key for stable, reproducible
@@ -51,6 +67,11 @@
 - Fixed `cli.jl` to expose `--cache-dir` option and pass it to `ApiProvider`.
 
 ### Tests
+- Added provider tests for DOI-less article fallback search, book search,
+  URL metadata extraction, direct PDF URL detection, and arXiv/URL/DOI recovery
+  from non-standard fields.
+- Added report tests for checklist symbols, field importance/severity columns,
+  ignored fields such as `abstract`, and exact key preservation.
 - Added `normalization helpers` testset covering `normalize_pages`,
   `normalize_year`, `normalize_authors`, `comparison_score`, and the
   `:missing_source` weight fix.

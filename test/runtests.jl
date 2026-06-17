@@ -1,5 +1,6 @@
 using HTTP
 using IncCSV
+using JSON3
 using PaperFetch
 using Test
 
@@ -123,6 +124,129 @@ end
     ids_url = extract_identifiers(e_url)
     @test any(id -> id.kind == :doi && id.value == "10.7554/elife.32822", ids_url)
     @test any(id -> id.kind == :url, ids_url)
+
+    e_latex_note = BibEntry("latex_note_doi", "article", Dict(
+        "note" => raw"DOI: \url{10.1007/s10489-019-01592-4}",
+    ))
+    ids_latex = extract_identifiers(e_latex_note)
+    @test any(id -> id.kind == :doi && id.value == "10.1007/s10489-019-01592-4", ids_latex)
+
+    e_note_url = BibEntry("note_url", "misc", Dict(
+        "note" => raw"Archived at \url{https://example.org/report.pdf}.",
+    ))
+    ids_note_url = extract_identifiers(e_note_url)
+    @test any(id -> id.kind == :url && id.value == "https://example.org/report.pdf", ids_note_url)
+
+    e_arxiv_note = BibEntry("arxiv_note", "misc", Dict(
+        "note" => "Preprint: arXiv:2401.01234v2",
+    ))
+    ids_arxiv_note = extract_identifiers(e_arxiv_note)
+    @test any(id -> id.kind == :arxiv && id.value == "2401.01234v2", ids_arxiv_note)
+end
+
+@testset "API fallback lookup paths" begin
+    calls = String[]
+    function fake_json(url; headers=Pair{String,String}[])
+        push!(calls, url)
+        if occursin("api.crossref.org/works?", url)
+            return JSON3.read("""
+            {"message":{"items":[{
+              "DOI":"10.1234/title-search",
+              "title":["Fallback Search Paper"],
+              "author":[{"given":"Erin","family":"Example"}],
+              "URL":"https://doi.org/10.1234/title-search",
+              "container-title":["Journal of Checks"],
+              "page":"10-20",
+              "publisher":"Example Press"
+            }]}}
+            """)
+        elseif occursin("api.openalex.org/works?search=", url)
+            return JSON3.read("""{"results":[]}""")
+        elseif occursin("openlibrary.org/search.json", url)
+            return JSON3.read("""
+            {"docs":[{
+              "key":"/works/OL1W",
+              "title":"Fallback Book",
+              "author_name":["Bert Book"],
+              "first_publish_year":2020,
+              "publisher":["Library Press"],
+              "isbn":["9780000000001"]
+            }]}
+            """)
+        elseif occursin("www.googleapis.com/books", url)
+            return JSON3.read("""
+            {"items":[{"id":"gb1","volumeInfo":{
+              "title":"Fallback Book",
+              "authors":["Bert Book"],
+              "publishedDate":"2020",
+              "publisher":"Google Press",
+              "infoLink":"https://books.example/fallback"
+            }}]}
+            """)
+        else
+            return JSON3.read("{}")
+        end
+    end
+    fake_text(url; headers=Pair{String,String}[]) = begin
+        push!(calls, url)
+        return "<feed></feed>"
+    end
+
+    provider = PaperFetch.ApiProvider(get_json=fake_json, get_text=fake_text)
+    article = BibEntry("no_doi_search", "article", Dict(
+        "title" => "Fallback Search Paper",
+        "author" => "Example, Erin",
+        "year" => "2024",
+    ))
+    article_sources = PaperFetch.sources_for(provider, article)
+    @test any(source -> source.provider == "crossref-search" &&
+        source.doi == "10.1234/title-search", article_sources)
+    @test any(url -> occursin("query.bibliographic=", url), calls)
+
+    book = BibEntry("book_search", "book", Dict(
+        "title" => "Fallback Book",
+        "author" => "Bert Book",
+    ))
+    book_sources = PaperFetch.sources_for(provider, book)
+    @test any(source -> source.provider == "openlibrary-search" &&
+        source.publisher == "Library Press", book_sources)
+    @test any(source -> source.provider == "google-books" &&
+        source.publisher == "Google Press", book_sources)
+end
+
+@testset "URL metadata and direct PDF lookup" begin
+    function fake_text(url; headers=Pair{String,String}[])
+        if endswith(url, ".pdf")
+            return "%PDF-1.7\nfixture"
+        end
+        return """
+        <html><head>
+          <meta name="citation_title" content="URL Metadata Paper">
+          <meta name="citation_author" content="Uma URL">
+          <meta name="citation_doi" content="10.5555/url-meta">
+          <meta name="citation_pdf_url" content="https://example.org/paper.pdf">
+        </head></html>
+        """
+    end
+    provider = PaperFetch.ApiProvider(get_text=fake_text,
+        get_json=(url; headers=Pair{String,String}[]) -> JSON3.read("{}"))
+
+    html_entry = BibEntry("url_meta", "misc", Dict(
+        "title" => "URL Metadata Paper",
+        "note" => raw"See \url{https://example.org/paper}",
+    ))
+    html_sources = PaperFetch.sources_for(provider, html_entry)
+    @test any(source -> source.provider == "url-metadata" &&
+        source.doi == "10.5555/url-meta" &&
+        source.pdf_url == "https://example.org/paper.pdf", html_sources)
+
+    pdf_entry = BibEntry("url_pdf", "misc", Dict(
+        "title" => "Direct PDF",
+        "url" => "https://example.org/direct.pdf",
+    ))
+    pdf_sources = PaperFetch.sources_for(provider, pdf_entry)
+    @test any(source -> source.provider == "url-pdf" &&
+        source.pdf_url == "https://example.org/direct.pdf", pdf_sources)
 end
 
 @testset "provider URL construction and errors" begin
@@ -204,6 +328,39 @@ end
     @test IncCSV.metadata(inc)["title"] == "PaperFetch bibliography validation report"
     rows = collect(IncCSV.table(inc))
     @test length(rows) >= 1
+end
+
+@testset "report checklist and key preservation" begin
+    entry = BibEntry("foo_bar-2024", "article", Dict(
+        "author" => "Example, Erin",
+        "title" => "Almost Correct Title",
+        "journal" => "Journal of Checks",
+        "year" => "2024",
+        "abstract" => "A bibliography manager field that should not matter.",
+    ))
+    source = SourceRecord(provider="fixture", title="Almost Corect Title",
+        authors=["Erin Example"], year="2024", journal="Journal of Checks",
+        publisher="Example Press")
+    report = compare_entry(entry, [source])
+    outdir = mktempdir()
+    paths = write_reports([report], outdir)
+    md = read(paths[:markdown], String)
+
+    @test occursin("## foo_bar-2024", md)
+    @test occursin("✅", md)
+    @test occursin("⚠️", md)
+    @test occursin("`publisher` is missing from BibTeX", md)
+    @test occursin("`title` needs manual review", md)
+    @test !occursin("abstract", md)
+
+    rows = collect(IncCSV.table(IncCSV.readinc(paths[:inc])))
+    @test all(row -> row.key == "foo_bar-2024", rows)
+    @test any(row -> row.field == "publisher" &&
+        row.importance == "supplementary" &&
+        row.severity == "amber", rows)
+    @test any(row -> row.field == "title" &&
+        row.importance == "important" &&
+        row.severity == "amber", rows)
 end
 
 @testset "fetch manifests" begin

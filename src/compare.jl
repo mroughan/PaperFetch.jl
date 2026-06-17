@@ -43,6 +43,78 @@ struct EntryReport
     pdf_candidates::Vector{String}
 end
 
+const IGNORED_REFERENCE_FIELDS = Set([
+    "abstract", "annote", "annotation", "bibsource", "biburl", "file",
+    "groups", "keywords", "language", "mendeley-tags", "owner",
+    "readstatus", "timestamp",
+])
+
+const SUPPLEMENTARY_FIELDS_BY_TYPE = Dict(
+    "article" => Set(["doi", "url", "volume", "number", "pages", "publisher", "issn", "month"]),
+    "book" => Set(["isbn", "doi", "url", "edition", "address", "series", "volume", "number", "month"]),
+    "booklet" => Set(["author", "howpublished", "address", "month", "year", "url", "doi"]),
+    "inbook" => Set(["chapter", "pages", "publisher", "editor", "doi", "url", "isbn", "address"]),
+    "incollection" => Set(["chapter", "pages", "publisher", "editor", "doi", "url", "isbn", "address"]),
+    "inproceedings" => Set(["publisher", "organization", "pages", "editor", "doi", "url", "isbn", "address"]),
+    "conference" => Set(["publisher", "organization", "pages", "editor", "doi", "url", "isbn", "address"]),
+    "manual" => Set(["author", "organization", "address", "edition", "month", "year", "url", "doi"]),
+    "mastersthesis" => Set(["type", "address", "month", "doi", "url"]),
+    "phdthesis" => Set(["type", "address", "month", "doi", "url"]),
+    "proceedings" => Set(["editor", "publisher", "organization", "address", "month", "doi", "url", "isbn"]),
+    "techreport" => Set(["type", "number", "address", "month", "doi", "url"]),
+    "report" => Set(["type", "number", "address", "month", "doi", "url"]),
+    "misc" => Set(["author", "year", "month", "note", "howpublished", "doi", "url", "urldate"]),
+    "online" => Set(["author", "year", "month", "note", "howpublished", "doi", "urldate"]),
+    "www" => Set(["author", "year", "month", "note", "howpublished", "doi", "urldate"]),
+)
+
+function required_field_groups(type::AbstractString)
+    t = lowercase(type)
+    if t == "article"
+        return [["author"], ["title"], ["journal"], ["year"]]
+    elseif t in ("book",)
+        return [["author", "editor"], ["title"], ["publisher"], ["year"]]
+    elseif t in ("inbook", "incollection")
+        return [["author", "editor"], ["title"], ["booktitle"], ["year"]]
+    elseif t in ("inproceedings", "conference")
+        return [["author"], ["title"], ["booktitle"], ["year"]]
+    elseif t in ("manual",)
+        return [["title"]]
+    elseif t in ("mastersthesis", "phdthesis")
+        return [["author"], ["title"], ["school"], ["year"]]
+    elseif t in ("proceedings",)
+        return [["title"], ["year"]]
+    elseif t in ("techreport", "report")
+        return [["author"], ["title"], ["institution"], ["year"]]
+    elseif t in ("misc", "online", "www")
+        return [["title"], ["url", "howpublished"]]
+    else
+        return [["title"]]
+    end
+end
+
+function field_importance(entry::BibEntry, field::AbstractString)
+    clean = lowercase(String(field))
+    clean in IGNORED_REFERENCE_FIELDS && return :ignored
+    for group in required_field_groups(entry.type)
+        clean in group && return :important
+    end
+    clean in get(SUPPLEMENTARY_FIELDS_BY_TYPE, lowercase(entry.type), Set{String}()) &&
+        return :supplementary
+    return :supplementary
+end
+
+function comparison_severity(entry::BibEntry, cmp::FieldComparison)
+    importance = field_importance(entry, cmp.field)
+    importance == :ignored && return :ignored
+    cmp.status in (:exact, :normalized, :equivalent) && return :green
+    cmp.status == :conflict && return :red
+    cmp.status == :ambiguous && return :amber
+    cmp.status == :missing_input && return importance == :important ? :red : :amber
+    cmp.status == :missing_source && return :amber
+    return :amber
+end
+
 function value_from_source(source::SourceRecord, field::AbstractString)
     field == "title"     && return source.title
     field == "doi"       && return source.doi

@@ -3,6 +3,57 @@ function markdown_escape(value)
     return replace(String(value), "|" => "\\|", "\n" => " ")
 end
 
+function checklist_symbol(severity::Symbol)
+    severity == :green && return "✅"
+    severity == :red && return "❌"
+    severity == :amber && return "⚠️"
+    return "•"
+end
+
+function field_group_label(group)
+    return join(["`$(field)`" for field in group], " or ")
+end
+
+function entry_has_field(entry::BibEntry, field::AbstractString)
+    value = get(entry.fields, field, nothing)
+    value === nothing && return false
+    return !isempty(strip(String(value)))
+end
+
+function checklist_items(report::EntryReport)
+    items = NamedTuple[]
+    for group in required_field_groups(report.entry.type)
+        present = any(field -> entry_has_field(report.entry, field), group)
+        push!(items, (
+            severity = present ? :green : :red,
+            field = join(group, "/"),
+            message = present ?
+                "Required field $(field_group_label(group)) is present" :
+                "Required field $(field_group_label(group)) is missing",
+        ))
+    end
+    for cmp in report.comparisons
+        severity = comparison_severity(report.entry, cmp)
+        severity == :ignored && continue
+        importance = field_importance(report.entry, cmp.field)
+        message = if severity == :green
+            "`$(cmp.field)` matches source metadata ($(cmp.status))"
+        elseif cmp.status == :conflict
+            "`$(cmp.field)` conflicts with source metadata: $(cmp.note)"
+        elseif cmp.status == :missing_input
+            "`$(cmp.field)` is missing from BibTeX ($(importance))"
+        elseif cmp.status == :missing_source
+            "`$(cmp.field)` could not be verified from source metadata"
+        elseif cmp.status == :ambiguous
+            "`$(cmp.field)` needs manual review: $(cmp.note)"
+        else
+            "`$(cmp.field)` needs review: $(cmp.note)"
+        end
+        push!(items, (severity=severity, field=cmp.field, message=message))
+    end
+    return items
+end
+
 function write_markdown(path::AbstractString, reports::Vector{EntryReport})
     open(path, "w") do io
         println(io, "# PaperFetch Report\n")
@@ -13,6 +64,10 @@ function write_markdown(path::AbstractString, reports::Vector{EntryReport})
             println(io, "- Confidence: $(report.confidence)")
             for note in report.notes
                 println(io, "- Note: $(note)")
+            end
+            println(io, "\nChecklist:")
+            for item in checklist_items(report)
+                println(io, "- $(checklist_symbol(item.severity)) $(item.message)")
             end
             println(io, "\n| Field | Status | BibTeX | Source | Note |")
             println(io, "| --- | --- | --- | --- | --- |")
@@ -40,6 +95,8 @@ function comparison_rows(reports::Vector{EntryReport})
                 type=report.entry.type,
                 confidence=report.confidence,
                 field=cmp.field,
+                importance=String(field_importance(report.entry, cmp.field)),
+                severity=String(comparison_severity(report.entry, cmp)),
                 status=String(cmp.status),
                 bibtex=something(cmp.input, ""),
                 source=something(cmp.source, ""),
@@ -62,6 +119,8 @@ function write_inc(path::AbstractString, reports::Vector{EntryReport})
             "type"       => "BibTeX entry type",
             "confidence" => "Record-level confidence score from 0 to 1",
             "field"      => "Compared field",
+            "importance" => "Citation importance of the field: important, supplementary, or ignored",
+            "severity"   => "Checklist severity for this comparison: green, amber, red, or ignored",
             "status"     => "Comparison status",
             "bibtex"     => "Input BibTeX value",
             "source"     => "Source metadata value",

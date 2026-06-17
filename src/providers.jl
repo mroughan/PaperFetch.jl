@@ -206,6 +206,26 @@ function sources_for(provider::ApiProvider, entry::BibEntry)
                 key = rec.provider * ":" * id.value
                 key in seen || (push!(seen, key); push!(sources, rec))
             end
+        elseif id.kind == :isbn
+            for rec in openlibrary_isbn_records(provider, id.value)
+                key = rec.provider * ":" * id.value
+                key in seen || (push!(seen, key); push!(sources, rec))
+            end
+            for rec in google_books_records(provider, "isbn:" * id.value)
+                key = rec.provider * ":" * id.value
+                key in seen || (push!(seen, key); push!(sources, rec))
+            end
+        elseif id.kind == :url
+            for rec in url_records(provider, id.value, entry)
+                key = rec.provider * ":" * id.value
+                key in seen || (push!(seen, key); push!(sources, rec))
+            end
+        end
+    end
+    if isempty(filter(!source_is_error, sources))
+        for rec in title_search_records(provider, entry)
+            key = rec.provider * ":" * source_identity(rec)
+            key in seen || (push!(seen, key); push!(sources, rec))
         end
     end
     return sources
@@ -373,6 +393,228 @@ function arxiv_records(provider::ApiProvider, arxiv_id::AbstractString)
             year=year, doi=raw_doi, url=abs_url, pdf_url=pdf_url)]
     catch err
         return [SourceRecord(provider="arxiv-error", id=strip(arxiv_id),
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function title_author_query(entry::BibEntry)
+    title = get(entry.fields, "title", nothing)
+    title === nothing && return nothing
+    author = get(entry.fields, "author", "")
+    parts = split(author, r"\s+and\s+"i)
+    first_author = isempty(parts) ? "" : first(parts)
+    query = isempty(first_author) ? title : title * " " * first_author
+    return strip(query)
+end
+
+function title_search_records(provider::ApiProvider, entry::BibEntry)
+    query = title_author_query(entry)
+    query === nothing && return SourceRecord[]
+    sources = SourceRecord[]
+    if entry.type in ("book", "inbook", "booklet", "manual", "proceedings")
+        append!(sources, openlibrary_search_records(provider, entry))
+        append!(sources, google_books_records(provider, query))
+    else
+        append!(sources, crossref_search_records(provider, entry))
+        append!(sources, openalex_search_records(provider, entry))
+        append!(sources, arxiv_search_records(provider, entry))
+    end
+    return sources
+end
+
+function crossref_search_records(provider::ApiProvider, entry::BibEntry)
+    query = title_author_query(entry)
+    query === nothing && return SourceRecord[]
+    url = "https://api.crossref.org/works?query.bibliographic=$(escapeuri(query))&rows=3"
+    headers = ["User-Agent" => "$(provider.user_agent) (mailto:$(provider.email))"]
+    try
+        obj = provider_get_json(provider, url; headers)
+        items = obj.message.items
+        records = SourceRecord[]
+        for item in items
+            title = hasproperty(item, :title) && !isempty(item.title) ? String(item.title[1]) : nothing
+            title === nothing && continue
+            authors = String[]
+            if hasproperty(item, :author)
+                for author in item.author
+                    given = String(get(author, :given, ""))
+                    family = String(get(author, :family, ""))
+                    push!(authors, strip(join(filter(!isempty, [given, family]), " ")))
+                end
+            end
+            journal = hasproperty(item, Symbol("container-title")) && !isempty(getproperty(item, Symbol("container-title"))) ?
+                String(getproperty(item, Symbol("container-title"))[1]) : nothing
+            push!(records, SourceRecord(provider="crossref-search", id=String(get(item, :DOI, "")),
+                title=title, authors=authors, doi=optional_string(item, :DOI),
+                url=optional_string(item, :URL), journal=journal,
+                pages=optional_string(item, :page), publisher=optional_string(item, :publisher)))
+        end
+        return records
+    catch err
+        return [SourceRecord(provider="crossref-search-error", id=query,
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function openalex_search_records(provider::ApiProvider, entry::BibEntry)
+    query = title_author_query(entry)
+    query === nothing && return SourceRecord[]
+    url = "https://api.openalex.org/works?search=$(escapeuri(query))&per-page=3&mailto=$(escapeuri(provider.email))"
+    try
+        obj = provider_get_json(provider, url)
+        records = SourceRecord[]
+        for item in obj.results
+            authors = String[]
+            if hasproperty(item, :authorships)
+                for authorship in item.authorships
+                    hasproperty(authorship, :author) && push!(authors, String(get(authorship.author, Symbol("display_name"), "")))
+                end
+            end
+            pdf_url = nothing
+            landing_url = nothing
+            if hasproperty(item, :primary_location) && item.primary_location !== nothing
+                pdf_url = optional_string(item.primary_location, :pdf_url)
+                landing_url = optional_string(item.primary_location, :landing_page_url)
+            end
+            push!(records, SourceRecord(provider="openalex-search", id=String(get(item, :id, "")),
+                title=optional_string(item, :title), authors=authors,
+                year=hasproperty(item, :publication_year) ? string(item.publication_year) : nothing,
+                doi=optional_string(item, :doi), url=landing_url, pdf_url=pdf_url))
+        end
+        return records
+    catch err
+        return [SourceRecord(provider="openalex-search-error", id=query,
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function arxiv_search_records(provider::ApiProvider, entry::BibEntry)
+    title = get(entry.fields, "title", nothing)
+    title === nothing && return SourceRecord[]
+    url = "https://export.arxiv.org/api/query?search_query=ti:$(escapeuri(title))&start=0&max_results=3"
+    try
+        body = provider_get_text(provider, url; headers=["User-Agent" => provider.user_agent])
+        records = SourceRecord[]
+        for m in eachmatch(r"<entry>(.*?)</entry>"s, body)
+            chunk = m.captures[1]
+            id = let x = match(r"<id>https?://arxiv\.org/abs/([^<]+)</id>", chunk); x === nothing ? "" : strip(x[1]) end
+            title2 = let x = match(r"<title[^>]*>(.*?)</title>"s, chunk); x === nothing ? nothing : replace(strip(x[1]), r"\s+" => " ") end
+            authors = [strip(x.match) for x in eachmatch(r"(?<=<name>)[^<]+", chunk)]
+            year = let x = match(r"<published>(\d{4})", chunk); x === nothing ? nothing : x[1] end
+            isempty(id) && continue
+            push!(records, SourceRecord(provider="arxiv-search", id=id, title=title2,
+                authors=authors, year=year, url="https://arxiv.org/abs/$(id)",
+                pdf_url="https://arxiv.org/pdf/$(id)"))
+        end
+        return records
+    catch err
+        return [SourceRecord(provider="arxiv-search-error", id=title,
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function openlibrary_isbn_records(provider::ApiProvider, isbn::AbstractString)
+    clean = replace(isbn, r"[^0-9Xx]" => "")
+    isempty(clean) && return SourceRecord[]
+    url = "https://openlibrary.org/isbn/$(escapeuri(clean)).json"
+    try
+        obj = provider_get_json(provider, url)
+        authors = String[]
+        if hasproperty(obj, :authors)
+            for author in obj.authors
+                key = String(get(author, :key, ""))
+                isempty(key) || push!(authors, key)
+            end
+        end
+        return [SourceRecord(provider="openlibrary", id=clean,
+            title=optional_string(obj, :title), authors=authors,
+            year=optional_string(obj, :publish_date),
+            publisher=hasproperty(obj, :publishers) && !isempty(obj.publishers) ? String(obj.publishers[1]) : nothing,
+            url="https://openlibrary.org/isbn/$(clean)",
+            raw=Dict{String,Any}("isbn" => clean))]
+    catch err
+        return [SourceRecord(provider="openlibrary-error", id=clean,
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function openlibrary_search_records(provider::ApiProvider, entry::BibEntry)
+    query = title_author_query(entry)
+    query === nothing && return SourceRecord[]
+    url = "https://openlibrary.org/search.json?q=$(escapeuri(query))&limit=3"
+    try
+        obj = provider_get_json(provider, url)
+        records = SourceRecord[]
+        for doc in obj.docs
+            authors = hasproperty(doc, :author_name) ? String.(doc.author_name) : String[]
+            isbn = hasproperty(doc, :isbn) && !isempty(doc.isbn) ? String(doc.isbn[1]) : ""
+            publisher = hasproperty(doc, :publisher) && !isempty(doc.publisher) ? String(doc.publisher[1]) : nothing
+            year = hasproperty(doc, :first_publish_year) ? string(doc.first_publish_year) : nothing
+            push!(records, SourceRecord(provider="openlibrary-search", id=String(get(doc, :key, "")),
+                title=optional_string(doc, :title), authors=authors, year=year,
+                publisher=publisher, url="https://openlibrary.org" * String(get(doc, :key, "")),
+                raw=Dict{String,Any}("isbn" => isbn)))
+        end
+        return records
+    catch err
+        return [SourceRecord(provider="openlibrary-search-error", id=query,
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function google_books_records(provider::ApiProvider, query::AbstractString)
+    url = "https://www.googleapis.com/books/v1/volumes?q=$(escapeuri(query))&maxResults=3"
+    try
+        obj = provider_get_json(provider, url)
+        hasproperty(obj, :items) || return SourceRecord[]
+        records = SourceRecord[]
+        for item in obj.items
+            info = item.volumeInfo
+            authors = hasproperty(info, :authors) ? String.(info.authors) : String[]
+            publisher = optional_string(info, :publisher)
+            year = optional_string(info, :publishedDate)
+            push!(records, SourceRecord(provider="google-books", id=String(get(item, :id, "")),
+                title=optional_string(info, :title), authors=authors, year=year,
+                publisher=publisher, url=optional_string(info, :infoLink)))
+        end
+        return records
+    catch err
+        return [SourceRecord(provider="google-books-error", id=String(query),
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function html_meta(content::AbstractString, names::Vector{String})
+    for name in names
+        rx = Regex("<meta[^>]+(?:name|property)=[\"']" * name * "[\"'][^>]+content=[\"']([^\"']+)[\"']", "is")
+        m = match(rx, content)
+        m !== nothing && return strip(m[1])
+        rx2 = Regex("<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+(?:name|property)=[\"']" * name * "[\"']", "is")
+        m = match(rx2, content)
+        m !== nothing && return strip(m[1])
+    end
+    return nothing
+end
+
+function url_records(provider::ApiProvider, url::AbstractString, entry::BibEntry)
+    try
+        body = provider_get_text(provider, String(url); headers=["User-Agent" => provider.user_agent])
+        if startswith(body, "%PDF")
+            return [SourceRecord(provider="url-pdf", id=String(url), title=get(entry.fields, "title", nothing),
+                url=String(url), pdf_url=String(url), raw=Dict{String,Any}("content" => "pdf"))]
+        end
+        title = html_meta(body, ["citation_title", "dc.title", "DC.title", "og:title"])
+        doi = html_meta(body, ["citation_doi", "dc.identifier", "DC.identifier"])
+        pdf = html_meta(body, ["citation_pdf_url"])
+        authors = String[]
+        for m in eachmatch(r"<meta[^>]+name=[\"']citation_author[\"'][^>]+content=[\"']([^\"']+)[\"']"is, body)
+            push!(authors, strip(m[1]))
+        end
+        return [SourceRecord(provider="url-metadata", id=String(url), title=title,
+            authors=authors, doi=doi === nothing ? nothing : normalize_doi(doi),
+            url=String(url), pdf_url=pdf, raw=Dict{String,Any}("content" => "html"))]
+    catch err
+        return [SourceRecord(provider="url-error", id=String(url),
             raw=Dict{String,Any}("error" => sprint(showerror, err)))]
     end
 end
