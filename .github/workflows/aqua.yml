@@ -1,0 +1,36 @@
+name: Aqua
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  aqua:
+    name: Aqua / latest Julia
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1'
+
+      - uses: julia-actions/cache@v2
+
+      - uses: julia-actions/julia-buildpkg@v1
+
+      - name: Run Aqua
+        run: |
+          julia -e '
+            using Pkg
+            Pkg.activate(; temp=true)
+            Pkg.develop(PackageSpec(path=pwd()))
+            Pkg.add("Aqua")
+            using Aqua, PaperFetch
+            Aqua.test_all(PaperFetch; ambiguities=false)
+          '

@@ -154,12 +154,19 @@ function compare_value(field::String, input::Union{Nothing,String}, source::Unio
         status = !isempty(left) && left == right ? (input == source ? :exact : :normalized) : :conflict
         note   = status in (:exact, :normalized) ? "year matches" : "years differ"
         return FieldComparison(field, status, input, source, note)
+    elseif field == "url"
+        left, right = normalize_url(input), normalize_url(source)
+        status = left == right ? (input == source ? :exact : :normalized) : :conflict
+        note = left == right ? "URLs match after DOI URL canonicalization" : "URLs differ"
+        return FieldComparison(field, status, input, source, note)
     elseif field == "author"
         left, right = normalize_authors(input), normalize_authors(source)
         input_truncated = occursin(r"(?i)\bet\.?\s+al\.?", input)
         source_truncated = occursin(r"(?i)\bet\.?\s+al\.?", source)
         status = if left == right
             input == source ? :exact : :equivalent
+        elseif author_signatures_match(input, source)
+            :equivalent
         elseif (input_truncated || source_truncated) &&
                 !isempty(left) && !isempty(right) &&
                 (occursin(first(split(left, ";")), right) || occursin(first(split(right, ";")), left))
@@ -201,6 +208,32 @@ function compare_value(field::String, input::Union{Nothing,String}, source::Unio
         end
         return FieldComparison(field, status, input, source, note)
     end
+end
+
+function year_gap(left::Union{Nothing,String}, right::Union{Nothing,String})
+    left === nothing && return nothing
+    right === nothing && return nothing
+    a = normalize_year(left)
+    b = normalize_year(right)
+    (isempty(a) || isempty(b)) && return nothing
+    return abs(parse(Int, a) - parse(Int, b))
+end
+
+function source_hard_mismatch(entry::BibEntry, source::SourceRecord, comparisons::Vector{FieldComparison})
+    for cmp in comparisons
+        if cmp.field in ("title", "author") && cmp.status == :conflict
+            return true
+        end
+    end
+    gap = year_gap(get(entry.fields, "year", nothing), source.year)
+    if gap !== nothing
+        if lowercase(entry.type) == "book" && gap >= 3
+            return true
+        elseif lowercase(entry.type) != "book" && gap >= 2
+            return true
+        end
+    end
+    return false
 end
 
 function comparison_score(comparisons)
@@ -258,9 +291,7 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
         return EntryReport(entry, sources, FieldComparison[], 0.0, notes, String[])
     end
 
-    best_source      = first(usable_sources)
-    best_comparisons = FieldComparison[]
-    best_score       = -1.0
+    candidates = NamedTuple[]
 
     for source in usable_sources
         comparisons = FieldComparison[]
@@ -271,12 +302,35 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
             push!(comparisons, compare_value(field, input_value, source_value))
         end
         score = comparison_score(comparisons)
-        if score > best_score
-            best_score       = score
-            best_source      = source
-            best_comparisons = comparisons
-        end
+        push!(candidates, (
+            source=source,
+            comparisons=comparisons,
+            score=score,
+            reliable=!source_hard_mismatch(entry, source, comparisons),
+        ))
     end
+
+    reliable_candidates = filter(candidate -> candidate.reliable, candidates)
+    if isempty(reliable_candidates)
+        notes = String["no reliable source metadata found"]
+        for candidate in candidates
+            reasons = [cmp.field for cmp in candidate.comparisons
+                if cmp.field in ("title", "author") && cmp.status == :conflict]
+            gap = year_gap(get(entry.fields, "year", nothing), candidate.source.year)
+            gap !== nothing && push!(reasons, "year")
+            isempty(reasons) || push!(notes,
+                "discarded $(candidate.source.provider): hard mismatch in $(join(unique(reasons), ", "))")
+        end
+        for source in provider_errors
+            push!(notes, "provider error: $(source.provider) $(get(source.raw, "error", ""))")
+        end
+        return EntryReport(entry, sources, FieldComparison[], 0.0, notes, String[])
+    end
+
+    best = first(sort!(collect(reliable_candidates), by=candidate -> candidate.score, rev=true))
+    best_source      = best.source
+    best_comparisons = best.comparisons
+    best_score       = best.score
 
     notes = String["best source: $(best_source.provider) ($(source_identity(best_source)))"]
     for source in provider_errors

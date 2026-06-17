@@ -55,6 +55,7 @@ function check_bibliography(path::AbstractString;
         cache_dir::Union{Nothing,String}        = nothing,
         check::Symbol                           = :warn)
     entries = read_items(path; check)
+    filter!(entry -> entry.key != "anon", entries)
     active  = AbstractProvider[]
     fixture === nothing || push!(active, records_from_json(fixture))
     append!(active, providers)

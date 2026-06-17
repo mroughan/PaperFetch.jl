@@ -21,12 +21,15 @@ end
 const DOI_PATTERN = r"(?i)(?:https?://(?:dx\.)?doi\.org/|doi\s*:\s*|\\url\s*\{\s*)?(10\.\d{4,9}/[^\s\}\]\"<>;,]+)"
 const URL_PATTERN = r"(?i)(?:\\url\s*\{\s*)?(https?://[^\s\}\]\"<>]+)"
 const ARXIV_PATTERN = r"(?i)(?:arxiv\s*[:/]\s*|arxiv\.org/(?:abs|pdf)/)(\d{4}\.\d{4,5}(?:v\d+)?)"
+const ADS_ARXIV_PATTERN = r"(?i)arxiv(\d{4})(\d{5})"
 const PMID_PATTERN = r"(?i)\b(?:pmid\s*:\s*)?(\d{6,9})\b"
 
 function dois_in_text(value::AbstractString)
     dois = String[]
     for match in eachmatch(DOI_PATTERN, value)
-        doi = normalize_doi(match.captures[1])
+        capture = match.captures[1]
+        capture === nothing && continue
+        doi = normalize_doi(capture)
         doi = replace(doi, r"[.)]+$" => "")
         isempty(doi) || doi in dois || push!(dois, doi)
     end
@@ -36,7 +39,9 @@ end
 function urls_in_text(value::AbstractString)
     urls = String[]
     for match in eachmatch(URL_PATTERN, value)
-        url = replace(strip(match.captures[1]), r"[.)]+$" => "")
+        capture = match.captures[1]
+        capture === nothing && continue
+        url = replace(strip(capture), r"[.)]+$" => "")
         isempty(url) || url in urls || push!(urls, url)
     end
     return urls
@@ -45,8 +50,16 @@ end
 function arxiv_ids_in_text(value::AbstractString)
     ids = String[]
     for match in eachmatch(ARXIV_PATTERN, value)
-        id = strip(match.captures[1])
+        capture = match.captures[1]
+        capture === nothing && continue
+        id = strip(capture)
         isempty(id) || id in ids || push!(ids, id)
+    end
+    for match in eachmatch(ADS_ARXIV_PATTERN, value)
+        first_part, second_part = match.captures[1], match.captures[2]
+        (first_part === nothing || second_part === nothing) && continue
+        id = first_part * "." * second_part
+        id in ids || push!(ids, id)
     end
     return ids
 end
@@ -54,7 +67,9 @@ end
 function pmids_in_text(value::AbstractString)
     ids = String[]
     for match in eachmatch(PMID_PATTERN, value)
-        id = strip(match.captures[1])
+        capture = match.captures[1]
+        capture === nothing && continue
+        id = strip(capture)
         isempty(id) || id in ids || push!(ids, id)
     end
     return ids
@@ -101,7 +116,7 @@ function extract_identifiers(entry::BibEntry)
         end
     end
 
-    for field in ("url", "note", "howpublished")
+    for field in ("url", "note", "howpublished", "adsurl", "eprint")
         value = get(entry.fields, field, nothing)
         value === nothing && continue
         for recovered in arxiv_ids_in_text(value)

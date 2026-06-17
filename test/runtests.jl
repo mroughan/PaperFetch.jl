@@ -11,9 +11,16 @@ example(name) = joinpath(EXAMPLES, name)
 
 @testset "normalization" begin
     @test normalize_doi("https://doi.org/10.1000/ABC") == "10.1000/abc"
+    @test normalize_doi("https://dx.doi.org/10.1000/ABC") == "10.1000/abc"
     @test normalize_doi("doi: 10.1000/ABC") == "10.1000/abc"
+    @test PaperFetch.normalize_url("https://dx.doi.org/10.1000/ABC") ==
+          PaperFetch.normalize_url("https://doi.org/10.1000/abc")
     @test normalize_text("{Caf\\'e} Data") == "cafe data"
     @test normalize_text("Cafe-data") == "cafe data"
+    @test normalize_text(raw"{\raggedright Proof of {C}onway's ``Simplicity Rule''}") ==
+          "proof of conway s simplicity rule"
+    @test normalize_text("Proof of Conway’s “Simplicity Rule”") ==
+          "proof of conway s simplicity rule"
 end
 
 @testset "normalization helpers" begin
@@ -31,6 +38,10 @@ end
           PaperFetch.normalize_authors("Muller, Max and Garcia, Ana")
     @test PaperFetch.normalize_authors("Smith, Jane et al.") ==
           PaperFetch.normalize_authors("Smith, Jane")
+    @test PaperFetch.author_signatures_match("M. L. Fredman", "Michael L. Fredman")
+    @test PaperFetch.author_signatures_match("Giuffr\\`{e}, M. and Shung, D.L.",
+          "Michele Giuffre and David L. Shung")
+    @test PaperFetch.author_signatures_match("Conway, J.H.", "John Horton Conway")
     @test !isempty(PaperFetch.normalize_authors("Smith, J. and Doe, J."))
     @test PaperFetch.near_match("bibliography checking", "bibliogrpahy checking")
     @test !PaperFetch.near_match("bibliography checking", "network calculus")
@@ -67,8 +78,16 @@ end
     cmp5 = PaperFetch.compare_value("author", "Jane Smiht", "Jane Smith")
     @test cmp5.status == :ambiguous
 
+    cmp6 = PaperFetch.compare_value("author", "M. L. Fredman", "Michael L. Fredman")
+    @test cmp6.status == :equivalent
+
     title_cmp = PaperFetch.compare_value("title", "A small bibliogrpahy checker", "A small bibliography checker")
     @test title_cmp.status == :ambiguous
+
+    url_cmp = PaperFetch.compare_value("url",
+        "https://dx.doi.org/10.1000/ABC",
+        "https://doi.org/10.1000/abc")
+    @test url_cmp.status == :normalized
 end
 
 @testset "BibTeX and plain input" begin
@@ -142,6 +161,14 @@ end
     ))
     ids_arxiv_note = extract_identifiers(e_arxiv_note)
     @test any(id -> id.kind == :arxiv && id.value == "2401.01234v2", ids_arxiv_note)
+
+    e_ads_arxiv = BibEntry("2016arXiv160803413M", "article", Dict(
+        "adsurl" => "http://adsabs.harvard.edu/abs/2016arXiv160803413M",
+        "note" => "arXiv:1503.00315",
+    ))
+    ids_ads = extract_identifiers(e_ads_arxiv)
+    @test any(id -> id.kind == :arxiv && id.value == "1608.03413", ids_ads)
+    @test any(id -> id.kind == :arxiv && id.value == "1503.00315", ids_ads)
 end
 
 @testset "API fallback lookup paths" begin
@@ -343,6 +370,57 @@ end
         source.doi == "10.2222/title", title_sources)
 end
 
+@testset "source selection rejects hard mismatches" begin
+    good = SourceRecord(provider="fixture-good",
+        title="Surreal Numbers with Derivation, Hardy Fields and Transseries: A Survey",
+        authors=["Vincenzo Mantova", "Mickael Matusinski"],
+        year="2016",
+        url="https://arxiv.org/abs/1608.03413")
+    bad = SourceRecord(provider="fixture-bad",
+        title="A completely different thesis",
+        authors=["Someone Else"],
+        year="1999")
+    entry = BibEntry("2016arXiv160803413M", "article", Dict(
+        "title" => "Surreal numbers with derivation, Hardy fields and transseries: a survey",
+        "author" => "Mantova, V. and Matusinski, M.",
+        "year" => "2016",
+    ))
+    report = compare_entry(entry, [bad, good])
+    @test report.confidence > 0.0
+    @test occursin("1608.03413", report.notes[1])
+
+    thesis = BibEntry("hosterler12:_surreal_number", "mastersthesis", Dict(
+        "title" => "Surreal Numbers",
+        "author" => "Daniel Hostetler",
+        "year" => "2012",
+    ))
+    wrong = SourceRecord(provider="fixture-wrong",
+        title="Totally Different Thesis",
+        authors=["Other Author"],
+        year="2012")
+    rejected = compare_entry(thesis, [wrong])
+    @test rejected.confidence == 0.0
+    @test any(note -> occursin("no reliable source metadata", note), rejected.notes)
+
+    old_book = SourceRecord(provider="book-old",
+        title="Table of Integrals, Series and Products",
+        authors=["I. S. Gradshteyn", "I. M. Ryzhik"],
+        year="1965",
+        publisher="Academic Press")
+    current_book = SourceRecord(provider="book-current",
+        title="Table of Integrals, Series and Products",
+        authors=["I. S. Gradshteyn", "I. M. Ryzhik"],
+        year="1980",
+        publisher="Academic Press")
+    book = BibEntry("GandR", "book", Dict(
+        "title" => "Table of integrals, series and products",
+        "author" => "I.S. Gradshteyn and I.M. Ryzhik",
+        "year" => "1980",
+    ))
+    book_report = compare_entry(book, [old_book, current_book])
+    @test occursin("book-current", book_report.notes[1])
+end
+
 @testset "URL metadata and direct PDF lookup" begin
     function fake_text(url; headers=Pair{String,String}[])
         if endswith(url, ".pdf")
@@ -389,6 +467,96 @@ end
     @test report.confidence == 0.0
     @test isempty(report.comparisons)
     @test any(note -> occursin("provider error", note), report.notes)
+end
+
+@testset "provider cache and error branches" begin
+    cache = mktempdir()
+    json_calls = Ref(0)
+    text_calls = Ref(0)
+    provider = PaperFetch.ApiProvider(cache_dir=cache,
+        get_json=(url; headers=Pair{String,String}[]) -> begin
+            json_calls[] += 1
+            JSON3.read("""{"value":42}""")
+        end,
+        get_text=(url; headers=Pair{String,String}[]) -> begin
+            text_calls[] += 1
+            "<ok />"
+        end)
+
+    @test PaperFetch.provider_get_json(provider, "https://cache.example/json").value == 42
+    @test PaperFetch.provider_get_json(provider, "https://cache.example/json").value == 42
+    @test json_calls[] == 1
+    @test PaperFetch.provider_get_text(provider, "https://cache.example/text") == "<ok />"
+    @test PaperFetch.provider_get_text(provider, "https://cache.example/text") == "<ok />"
+    @test text_calls[] == 1
+    @test length(filter(path -> endswith(path, ".meta.json"), readdir(cache))) == 2
+
+    failing = PaperFetch.ApiProvider(
+        get_json=(url; headers=Pair{String,String}[]) -> error("boom json"),
+        get_text=(url; headers=Pair{String,String}[]) -> error("boom text"))
+
+    @test first(PaperFetch.crossref_records(failing, "10.1000/x")).provider == "crossref-error"
+    @test first(PaperFetch.openalex_records(failing, "10.1000/x")).provider == "openalex-error"
+    @test first(PaperFetch.unpaywall_records(failing, "10.1000/x")).provider == "unpaywall-error"
+    @test first(PaperFetch.datacite_records(failing, "10.1000/x")).provider == "datacite-error"
+    @test first(PaperFetch.arxiv_records(failing, "2401.01234")).provider == "arxiv-error"
+    @test first(PaperFetch.semantic_scholar_records(failing, "10.1000/x")).provider == "semantic-scholar-error"
+    @test first(PaperFetch.pubmed_records(failing, "10.1000/x")).provider == "pubmed-error"
+    @test first(PaperFetch.core_records(failing, "10.1000/x")).provider == "core-error"
+    @test first(PaperFetch.figshare_records(failing, "10.1000/x")).provider == "figshare-error"
+    @test first(PaperFetch.openlibrary_isbn_records(failing, "9783161484100")).provider == "openlibrary-error"
+    @test first(PaperFetch.google_books_records(failing, "title")).provider == "google-books-error"
+    @test first(PaperFetch.url_records(failing, "https://example.org/page", BibEntry("x", "misc", Dict()))).provider == "url-error"
+end
+
+@testset "book and repository provider shapes" begin
+    function fake_json(url; headers=Pair{String,String}[])
+        if occursin("openlibrary.org/isbn", url)
+            return JSON3.read("""
+            {
+              "title":"ISBN Book",
+              "publish_date":"1999",
+              "authors":[{"key":"/authors/OL1A"}],
+              "publishers":["Open Library Press"]
+            }
+            """)
+        elseif occursin("openlibrary.org/search.json", url)
+            return JSON3.read("""
+            {"docs":[{
+              "key":"/works/OL2W",
+              "title":"Search Book",
+              "author_name":["Sally Search"],
+              "first_publish_year":2001,
+              "publisher":["Search Press"]
+            }]}
+            """)
+        elseif occursin("www.googleapis.com/books", url)
+            return JSON3.read("""
+            {"items":[{"id":"gb2","volumeInfo":{
+              "title":"Google Book",
+              "authors":["Gary Google"],
+              "publishedDate":"2002-01-01",
+              "publisher":"Google Books Press",
+              "infoLink":"https://books.example/google"
+            }}]}
+            """)
+        else
+            return JSON3.read("{}")
+        end
+    end
+    provider = PaperFetch.ApiProvider(get_json=fake_json,
+        get_text=(url; headers=Pair{String,String}[]) -> "")
+
+    isbn_sources = PaperFetch.openlibrary_isbn_records(provider, "978-3-16-148410-0")
+    @test isbn_sources[1].title == "ISBN Book"
+    @test isbn_sources[1].raw["isbn"] == "9783161484100"
+
+    entry = BibEntry("book", "book", Dict("title" => "Search Book", "author" => "Search, Sally"))
+    openlibrary_sources = PaperFetch.openlibrary_search_records(provider, entry)
+    @test openlibrary_sources[1].url == "https://openlibrary.org/works/OL2W"
+
+    google_sources = PaperFetch.google_books_records(provider, "Google Book")
+    @test google_sources[1].publisher == "Google Books Press"
 end
 
 @testset "comparison statuses from examples" begin
@@ -559,4 +727,63 @@ end
     PaperFetch.main(["check", example("01_exact_article.bib"), "--fixture", FIXTURE, "--outdir", outdir])
     @test isfile(joinpath(outdir, "paperfetch_report.md"))
     @test isfile(joinpath(outdir, "paperfetch_report.inc"))
+
+    parsed = PaperFetch.parse_cli([
+        "fetch", example("01_exact_article.bib"),
+        "--fixture", FIXTURE,
+        "--outdir", outdir,
+        "--email", "person@example.org",
+        "--use-apis",
+        "--cache-dir", ".cache",
+        "--cookie-file", "cookies.txt",
+        "--ezproxy", "https://proxy.example/login?url={url}",
+    ])
+    @test parsed["mode"] == "fetch"
+    @test parsed["use-apis"] == true
+    @test parsed["cache-dir"] == ".cache"
+    @test parsed["cookie-file"] == "cookies.txt"
+    @test parsed["ezproxy"] == "https://proxy.example/login?url={url}"
+end
+
+@testset "CLI fetch and invalid mode" begin
+    dir = mktempdir()
+    bib = joinpath(dir, "nopdf.bib")
+    fixture = joinpath(dir, "fixture.json")
+    outdir = joinpath(dir, "out")
+    write(bib, """
+    @misc{nopdf, title={No PDF Entry}, year={2024}}
+    """)
+    write(fixture, """
+    {"records":[{
+      "key":"nopdf",
+      "provider":"fixture",
+      "title":"No PDF Entry",
+      "year":"2024"
+    }]}
+    """)
+    PaperFetch.main(["fetch", bib, "--fixture", fixture, "--outdir", outdir])
+    @test isfile(joinpath(outdir, "paperfetch_report.md"))
+    @test isfile(joinpath(outdir, "paperfetch_report.inc"))
+    @test isfile(joinpath(outdir, "manifest.inc"))
+    rows = collect(IncCSV.table(IncCSV.readinc(joinpath(outdir, "manifest.inc"))))
+    @test rows[1].status == "skipped"
+
+    project = dirname(Base.active_project())
+    code = "using PaperFetch; PaperFetch.main([\"bad\", \"$(bib)\"])"
+    cmd = `$(Base.julia_cmd()) --project=$project -e $code`
+    proc = run(pipeline(cmd; stdout=devnull, stderr=devnull); wait=false)
+    wait(proc)
+    @test proc.exitcode == 1
+end
+
+@testset "anon key is skipped by check_bibliography" begin
+    dir = mktempdir()
+    bib = joinpath(dir, "anon.bib")
+    write(bib, """
+    @article{anon, title={For review}, author={Anon}, year={2024}}
+    @misc{real_key, title={Real Reference}, year={2024}}
+    """)
+    reports = check_bibliography(bib; check=:none)
+    @test length(reports) == 1
+    @test reports[1].entry.key == "real_key"
 end

@@ -39,6 +39,20 @@
   repeat runs without re-querying providers.
 
 ### Bug fixes
+- Improved LaTeX title normalization for search and comparison: braces,
+  TeX-style quotation marks, smart quotes, and formatting macros such as
+  `\raggedright` are normalized away before matching/searching.
+- Improved title/author search queries to use normalized title words plus all
+  available author surnames instead of only the first raw author string.
+- Added ADS-style arXiv identifier recovery, e.g. `2016arXiv160803413M` now
+  yields `1608.03413`.
+- Improved author matching for surname plus initials, so full names and
+  initialized names can match after normalization.
+- Hardened source selection: candidates with title/author hard conflicts, or
+  large year gaps for books, are discarded rather than selected as low-confidence
+  matches.
+- `check_bibliography` now skips BibTeX key `anon`, which is treated as an
+  anonymized-review artifact rather than a real reference.
 - Fixed DOI extraction from LaTeX `\url{...}` wrappers in misplaced fields
   such as `note`.
 - Added PMID extraction from `pmid`, `note`, `url`, and `howpublished` fields.
@@ -77,11 +91,19 @@
 - Fixed `cli.jl` to expose `--cache-dir` option and pass it to `ApiProvider`.
 
 ### Tests
+- Expanded offline coverage for `providers.jl`: cache hit paths, provider error
+  branches, Open Library ISBN/search records, Google Books records, and
+  repository metadata shapes are now covered with mocked responses.
+- Expanded offline coverage for `cli.jl`: CLI option parsing, check mode, fetch
+  mode manifest generation, and invalid-mode exit behavior are now tested.
 - Added provider tests for DOI-less article fallback search, book search,
   URL metadata extraction, direct PDF URL detection, and arXiv/URL/DOI recovery
   from non-standard fields.
 - Added provider tests for Semantic Scholar, PubMed, CORE, Figshare, and PMID
   extraction using mocked API responses.
+- Added regression tests from `surreals.bib`-style failures: LaTeX title
+  normalization, ADS arXiv IDs, surname/initial author matching, hard mismatch
+  source rejection, book year mismatch rejection, and skipping `anon`.
 - Added report tests for checklist symbols, field importance/severity columns,
   ignored fields such as `abstract`, and exact key preservation.
 - Added `normalization helpers` testset covering `normalize_pages`,
@@ -98,11 +120,11 @@
 ### CI/CD
 - Added `.github/workflows/ci.yml`: tests on Julia 1.11 and nightly
   with Codecov coverage upload.
-- Added `.github/workflows/quality.yml`: JET and Aqua checks on latest Julia
-  only, separate from main CI.
+- Added separate `.github/workflows/jet.yml` and `.github/workflows/aqua.yml`
+  checks on latest stable Julia only.
 - Added `.github/workflows/documenter.yml`: Documenter.jl documentation build
   and deployment on push to `main` or tag.
-- Added badges (CI, Codecov, Quality, Documentation stable/dev, License) to
+- Added badges (CI, Codecov, JET, Aqua, Documentation stable/dev, License) to
   README.
 
 ## 0.2.0 (previous)

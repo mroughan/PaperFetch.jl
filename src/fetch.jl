@@ -37,9 +37,9 @@ function read_cookie_file(path::Union{Nothing,String})
     return cookies
 end
 
-function cookie_for_url(cookies::Dict{String,String}, url::String)
+function cookie_for_url(cookies::Dict{String,String}, url::AbstractString)
     host = try
-        URIs.URI(url).host
+        URIs.URI(String(url)).host
     catch
         nothing
     end
@@ -62,9 +62,9 @@ function proxied_url(url::String, ezproxy::Union{Nothing,String})
                                          template * escapeuri(url)
 end
 
-function download_pdf(url::String, dest::String; cookies=Dict{String,String}(),
-        ezproxy=nothing, timeout::Int=60, http_get=HTTP.get)
-    actual  = proxied_url(url, ezproxy)
+function download_pdf(url::String, dest::String; cookies::Dict{String,String}=Dict{String,String}(),
+        ezproxy::Union{Nothing,String}=nothing, timeout::Int=60, http_get=HTTP.get)
+    actual  = String(proxied_url(url, ezproxy))
     headers = ["User-Agent" => DEFAULT_USER_AGENT]
     cookie  = cookie_for_url(cookies, actual)
     cookie === nothing || push!(headers, "Cookie" => cookie)

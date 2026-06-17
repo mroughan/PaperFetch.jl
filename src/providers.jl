@@ -131,6 +131,7 @@ function records_from_json(path::AbstractString)
     bykey = Dict{String,Vector{SourceRecord}}()
     bydoi = Dict{String,Vector{SourceRecord}}()
     rows = hasproperty(obj, :records) ? obj.records : obj
+    rows === nothing && return FixtureProvider(bykey, bydoi)
     for row in rows
         authors = hasproperty(row, :authors) ? String.(row.authors) : String[]
         record = SourceRecord(
@@ -273,9 +274,10 @@ function crossref_records(provider::ApiProvider, doi::AbstractString)
         authors = String[]
         if hasproperty(msg, :author)
             for author in msg.author
-                given = String(get(author, :given, ""))
-                family = String(get(author, :family, ""))
-                push!(authors, strip(join(filter(!isempty, [given, family]), " ")))
+                given = optional_string(author, :given)
+                family = optional_string(author, :family)
+                parts = filter(!isempty, [something(given, ""), something(family, "")])
+                isempty(parts) || push!(authors, join(parts, " "))
             end
         end
         year = nothing
@@ -421,11 +423,18 @@ end
 function title_author_query(entry::BibEntry)
     title = get(entry.fields, "title", nothing)
     title === nothing && return nothing
-    author = get(entry.fields, "author", "")
-    parts = split(author, r"\s+and\s+"i)
-    first_author = isempty(parts) ? "" : first(parts)
-    query = isempty(first_author) ? title : title * " " * first_author
+    clean_title = normalize_text(title)
+    isempty(clean_title) && return nothing
+    surnames = author_surnames(get(entry.fields, "author", ""))
+    query = isempty(surnames) ? clean_title : clean_title * " " * join(surnames, " ")
     return strip(query)
+end
+
+function title_query(entry::BibEntry)
+    title = get(entry.fields, "title", nothing)
+    title === nothing && return nothing
+    clean = normalize_text(title)
+    return isempty(clean) ? nothing : clean
 end
 
 function title_search_records(provider::ApiProvider, entry::BibEntry)
@@ -462,9 +471,10 @@ function crossref_search_records(provider::ApiProvider, entry::BibEntry)
             authors = String[]
             if hasproperty(item, :author)
                 for author in item.author
-                    given = String(get(author, :given, ""))
-                    family = String(get(author, :family, ""))
-                    push!(authors, strip(join(filter(!isempty, [given, family]), " ")))
+                    given = optional_string(author, :given)
+                    family = optional_string(author, :family)
+                    parts = filter(!isempty, [something(given, ""), something(family, "")])
+                    isempty(parts) || push!(authors, join(parts, " "))
                 end
             end
             journal = hasproperty(item, Symbol("container-title")) && !isempty(getproperty(item, Symbol("container-title"))) ?
@@ -514,7 +524,7 @@ function openalex_search_records(provider::ApiProvider, entry::BibEntry)
 end
 
 function arxiv_search_records(provider::ApiProvider, entry::BibEntry)
-    title = get(entry.fields, "title", nothing)
+    title = title_query(entry)
     title === nothing && return SourceRecord[]
     url = "https://export.arxiv.org/api/query?search_query=ti:$(escapeuri(title))&start=0&max_results=3"
     try
@@ -522,10 +532,17 @@ function arxiv_search_records(provider::ApiProvider, entry::BibEntry)
         records = SourceRecord[]
         for m in eachmatch(r"<entry>(.*?)</entry>"s, body)
             chunk = m.captures[1]
-            id = let x = match(r"<id>https?://arxiv\.org/abs/([^<]+)</id>", chunk); x === nothing ? "" : strip(x[1]) end
-            title2 = let x = match(r"<title[^>]*>(.*?)</title>"s, chunk); x === nothing ? nothing : replace(strip(x[1]), r"\s+" => " ") end
+            chunk === nothing && continue
+            id_match = match(r"<id>https?://arxiv\.org/abs/([^<]+)</id>", chunk)
+            id_capture = id_match === nothing ? nothing : id_match.captures[1]
+            id = id_capture === nothing ? "" : strip(id_capture)
+            title_match = match(r"<title[^>]*>(.*?)</title>"s, chunk)
+            title_capture = title_match === nothing ? nothing : title_match.captures[1]
+            title2 = title_capture === nothing ? nothing : replace(strip(title_capture), r"\s+" => " ")
             authors = [strip(x.match) for x in eachmatch(r"(?<=<name>)[^<]+", chunk)]
-            year = let x = match(r"<published>(\d{4})", chunk); x === nothing ? nothing : x[1] end
+            year_match = match(r"<published>(\d{4})", chunk)
+            year_capture = year_match === nothing ? nothing : year_match.captures[1]
+            year = year_capture === nothing ? nothing : String(year_capture)
             isempty(id) && continue
             push!(records, SourceRecord(provider="arxiv-search", id=id, title=title2,
                 authors=authors, year=year, url="https://arxiv.org/abs/$(id)",
@@ -894,10 +911,16 @@ function html_meta(content::AbstractString, names::Vector{String})
     for name in names
         rx = Regex("<meta[^>]+(?:name|property)=[\"']" * name * "[\"'][^>]+content=[\"']([^\"']+)[\"']", "is")
         m = match(rx, content)
-        m !== nothing && return strip(m[1])
+        if m !== nothing
+            capture = m[1]
+            capture !== nothing && return strip(capture)
+        end
         rx2 = Regex("<meta[^>]+content=[\"']([^\"']+)[\"'][^>]+(?:name|property)=[\"']" * name * "[\"']", "is")
         m = match(rx2, content)
-        m !== nothing && return strip(m[1])
+        if m !== nothing
+            capture = m[1]
+            capture !== nothing && return strip(capture)
+        end
     end
     return nothing
 end
@@ -914,7 +937,8 @@ function url_records(provider::ApiProvider, url::AbstractString, entry::BibEntry
         pdf = html_meta(body, ["citation_pdf_url"])
         authors = String[]
         for m in eachmatch(r"<meta[^>]+name=[\"']citation_author[\"'][^>]+content=[\"']([^\"']+)[\"']"is, body)
-            push!(authors, strip(m[1]))
+            author = m[1]
+            author === nothing || push!(authors, strip(author))
         end
         return [SourceRecord(provider="url-metadata", id=String(url), title=title,
             authors=authors, doi=doi === nothing ? nothing : normalize_doi(doi),

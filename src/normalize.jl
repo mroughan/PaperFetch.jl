@@ -7,11 +7,14 @@ const LATEX_ACCENTS = Dict(
 
 function strip_latex(value::AbstractString)
     text = lowercase(value)
+    text = replace(text, r"``|''|[“”„]" => "\"")
+    text = replace(text, r"[‘’‚]" => "'")
     text = replace(text, r"\{\\([`'\"^~=.uvHtcdb])\s*\{?([a-z])\}?\}" => s"\2")
     text = replace(text, r"\\([`'\"^~=.uvHtcdb])\s*\{?([a-z])\}?" => s"\2")
     for (src, dst) in LATEX_ACCENTS
         text = replace(text, src => dst)
     end
+    text = replace(text, r"\\(?:raggedright|footnotesize|scriptsize|small|normalsize|large|Large|LARGE|huge|Huge)\b" => " ")
     text = replace(text, r"[{}]" => "")
     text = replace(text, r"\\[a-zA-Z]+" => "")
     return text
@@ -35,6 +38,19 @@ function normalize_doi(value::AbstractString)
     doi = strip(doi)
     doi = replace(doi, r"\s+" => "")
     return lowercase(doi)
+end
+
+function normalize_url(value::AbstractString)
+    text = strip(value)
+    text = replace(text, r"[.)]+$" => "")
+    doi_match = match(r"(?i)^https?://(?:dx\.)?doi\.org/(10\.\d{4,9}/.+)$", text)
+    if doi_match !== nothing
+        capture = doi_match.captures[1]
+        capture !== nothing && return "doi:" * normalize_doi(capture)
+    end
+    text = replace(text, r"(?i)^https?://" => "")
+    text = replace(text, r"/+$" => "")
+    return lowercase(text)
 end
 
 """
@@ -119,6 +135,52 @@ function normalize_authors(value::AbstractString)
     clean = normalize_author_part.(parts)
     sort!(filter!(!isempty, clean))
     return join(clean, ";")
+end
+
+function normalized_author_signature_part(value::AbstractString)
+    text = strip(value)
+    given = ""
+    surname = ""
+    if occursin(",", text)
+        pieces = split(text, ","; limit=2)
+        surname = normalize_text(strip(pieces[1]))
+        given = normalize_text(strip(pieces[2]))
+    else
+        pieces = split(normalize_text(text))
+        isempty(pieces) && return nothing
+        surname = last(pieces)
+        given = join(pieces[1:end-1], " ")
+    end
+    isempty(surname) && return nothing
+    initials = join([first(part) for part in split(given) if !isempty(part)])
+    return (surname=surname, initials=initials)
+end
+
+function normalized_author_signatures(value::AbstractString)
+    value = replace(value, r"(?i)\bet\.?\s+al\.?" => "")
+    parts = split(value, r"\s+(?:and|&)\s+"i)
+    sigs = filter(!isnothing, normalized_author_signature_part.(parts))
+    return sort!(collect(sigs), by=s -> (s.surname, s.initials))
+end
+
+function compatible_initials(left::AbstractString, right::AbstractString)
+    isempty(left) || isempty(right) || startswith(left, right) || startswith(right, left)
+end
+
+function author_signatures_match(left::AbstractString, right::AbstractString)
+    a = normalized_author_signatures(left)
+    b = normalized_author_signatures(right)
+    (isempty(a) || isempty(b) || length(a) != length(b)) && return false
+    for (x, y) in zip(a, b)
+        x.surname == y.surname || return false
+        compatible_initials(x.initials, y.initials) || return false
+    end
+    return true
+end
+
+function author_surnames(value::AbstractString)
+    sigs = normalized_author_signatures(value)
+    return unique([sig.surname for sig in sigs if !isempty(sig.surname)])
 end
 
 function edit_distance(left::AbstractString, right::AbstractString)

@@ -1,4 +1,4 @@
-name: Quality
+name: JET
 
 on:
   push:
@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   jet:
-    name: JET
+    name: JET / latest Julia
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,37 +26,16 @@ jobs:
 
       - name: Run JET
         run: |
-          julia --project -e '
+          julia -e '
             using Pkg
+            Pkg.activate(; temp=true)
+            Pkg.develop(PackageSpec(path=pwd()))
             Pkg.add("JET")
             using JET, PaperFetch
-            report = JET.report_package(PaperFetch; target_defined_modules=true)
+            report = JET.report_package(PaperFetch; target_modules=(PaperFetch,))
             if !isempty(JET.get_reports(report))
               display(report)
               exit(1)
             end
             println("JET: no issues found")
-          '
-
-  aqua:
-    name: Aqua
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: julia-actions/setup-julia@v2
-        with:
-          version: '1'
-
-      - uses: julia-actions/cache@v2
-
-      - uses: julia-actions/julia-buildpkg@v1
-
-      - name: Run Aqua
-        run: |
-          julia --project -e '
-            using Pkg
-            Pkg.add("Aqua")
-            using Aqua, PaperFetch
-            Aqua.test_all(PaperFetch; ambiguities=false)
           '
