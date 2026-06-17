@@ -75,11 +75,12 @@ julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
 
 This writes:
 
-- `paperfetch_out/paperfetch_report.md`
-- `paperfetch_out/paperfetch_report.inc`
+- `paperfetch_out/01_exact_article.md`
+- `paperfetch_out/01_exact_article.inc`
 
 The Markdown report is meant for direct reading. The INC report is meant for
-spreadsheets and downstream tooling.
+spreadsheets and downstream tooling. CLI report names default to the input file
+stem; pass `--report-basename NAME` to choose a different basename.
 
 ## Live API Checks
 
@@ -117,8 +118,8 @@ julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
 
 Outputs include:
 
-- `paperfetch_out/paperfetch_report.md`
-- `paperfetch_out/paperfetch_report.inc`
+- `paperfetch_out/references.md`
+- `paperfetch_out/references.inc`
 - `paperfetch_out/manifest.inc`
 - downloaded `*.pdf` files when candidate URLs are available and reachable
 

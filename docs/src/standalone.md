@@ -115,8 +115,8 @@ PaperFetchCompiled/bin/paperfetch check \
 
 Confirm that the app writes:
 
-- `/tmp/paperfetch_smoke/paperfetch_report.md`
-- `/tmp/paperfetch_smoke/paperfetch_report.inc`
+- `/tmp/paperfetch_smoke/01_exact_article.md`
+- `/tmp/paperfetch_smoke/01_exact_article.inc`
 
 Then run a small live check if the app is intended to use network APIs:
 

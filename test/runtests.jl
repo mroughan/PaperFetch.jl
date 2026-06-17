@@ -906,13 +906,20 @@ end
 @testset "CLI check mode" begin
     outdir = mktempdir()
     PaperFetch.main(["check", example("01_exact_article.bib"), "--fixture", FIXTURE, "--outdir", outdir])
-    @test isfile(joinpath(outdir, "paperfetch_report.md"))
-    @test isfile(joinpath(outdir, "paperfetch_report.inc"))
+    @test isfile(joinpath(outdir, "01_exact_article.md"))
+    @test isfile(joinpath(outdir, "01_exact_article.inc"))
+
+    custom_outdir = mktempdir()
+    PaperFetch.main(["check", example("01_exact_article.bib"), "--fixture", FIXTURE,
+        "--outdir", custom_outdir, "--report-basename", "paperfetch_report"])
+    @test isfile(joinpath(custom_outdir, "paperfetch_report.md"))
+    @test isfile(joinpath(custom_outdir, "paperfetch_report.inc"))
 
     parsed = PaperFetch.parse_cli([
         "fetch", example("01_exact_article.bib"),
         "--fixture", FIXTURE,
         "--outdir", outdir,
+        "--report-basename", "custom_report",
         "--email", "person@example.org",
         "--use-apis",
         "--cache-dir", ".cache",
@@ -922,6 +929,7 @@ end
         "--ezproxy", "https://proxy.example/login?url={url}",
     ])
     @test parsed["mode"] == "fetch"
+    @test parsed["report-basename"] == "custom_report"
     @test parsed["use-apis"] == true
     @test parsed["cache-dir"] == ".cache"
     @test parsed["rate-limit-seconds"] == "0.02"
@@ -947,8 +955,8 @@ end
     }]}
     """)
     PaperFetch.main(["fetch", bib, "--fixture", fixture, "--outdir", outdir])
-    @test isfile(joinpath(outdir, "paperfetch_report.md"))
-    @test isfile(joinpath(outdir, "paperfetch_report.inc"))
+    @test isfile(joinpath(outdir, "nopdf.md"))
+    @test isfile(joinpath(outdir, "nopdf.inc"))
     @test isfile(joinpath(outdir, "manifest.inc"))
     rows = collect(IncCSV.table(IncCSV.readinc(joinpath(outdir, "manifest.inc"))))
     @test rows[1].status == "skipped"

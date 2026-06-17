@@ -12,6 +12,8 @@ function parse_cli(args)
         "--outdir"
             help    = "Output directory"
             default = "paperfetch_out"
+        "--report-basename"
+            help = "Basename for Markdown and INC reports; defaults to the input file stem"
         "--fixture"
             help = "JSON metadata fixture for deterministic/offline runs"
         "--email"
@@ -57,6 +59,8 @@ function main(args=ARGS)
     ignore_keys = let text = strip(options["ignore-keys"])
         isempty(text) ? Set{String}() : Set(strip.(split(text, ",")))
     end
+    report_basename = something(options["report-basename"],
+        first(splitext(basename(options["input"]))))
 
     reports = check_bibliography(options["input"];
         fixture            = options["fixture"],
@@ -66,7 +70,7 @@ function main(args=ARGS)
         rate_limit_seconds = rate_limit_seconds,
         ignore_keys        = ignore_keys,
         check              = :warn)
-    paths = write_reports(reports, options["outdir"])
+    paths = write_reports(reports, options["outdir"]; basename=report_basename)
     println("Wrote: $(paths[:markdown])")
     println("Wrote: $(paths[:inc])")
 

@@ -153,6 +153,10 @@ end
 
 Write Markdown and INC reports for `reports`.
 
+The default basename is `paperfetch_report` for direct API calls. CLI-generated
+reports use the input file stem unless `--report-basename` is supplied. Pass
+`basename` explicitly when a different output name is needed.
+
 # Example
 
 ```julia

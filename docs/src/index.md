@@ -29,11 +29,13 @@ julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
 
 This writes:
 
-- `paperfetch_out/paperfetch_report.md`
-- `paperfetch_out/paperfetch_report.inc`
+- `paperfetch_out/01_exact_article.md`
+- `paperfetch_out/01_exact_article.inc`
 
 The Markdown report is for direct human review. The INC report is a CSV-like
-table with metadata, suitable for spreadsheets and downstream tooling.
+table with metadata, suitable for spreadsheets and downstream tooling. CLI
+report names default to the input file stem; pass `--report-basename NAME` to
+choose a different basename.
 
 ## Julia API Tutorial
 
