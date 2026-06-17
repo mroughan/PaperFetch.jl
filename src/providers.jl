@@ -413,7 +413,7 @@ function arxiv_records(provider::ApiProvider, arxiv_id::AbstractString)
         # Extract entry-level title (skip the feed <title> by anchoring to <entry>)
         title = let m = match(r"<entry>.*?<title[^>]*>(.*?)</title>"s, body)
             capture = m === nothing ? nothing : m.captures[1]
-            capture === nothing ? nothing : strip(capture)
+            capture === nothing ? nothing : replace(strip(capture), r"\s+" => " ")
         end
         authors = [strip(m.match) for m in eachmatch(r"(?<=<name>)[^<]+", body)]
         year = arxiv_year_from_xml(body)
@@ -854,8 +854,10 @@ function openlibrary_isbn_records(provider::ApiProvider, isbn::AbstractString)
         authors = String[]
         if hasproperty(obj, :authors)
             for author in obj.authors
-                key = String(get(author, :key, ""))
-                isempty(key) || push!(authors, key)
+                # ISBN records return {"key": "/authors/OL1A"} with no inline name.
+                # Only capture a name if the record explicitly provides one.
+                name = optional_string(author, :name)
+                name !== nothing && push!(authors, name)
             end
         end
         return [SourceRecord(provider="openlibrary", id=clean,

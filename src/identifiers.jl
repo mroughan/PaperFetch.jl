@@ -22,7 +22,7 @@ const DOI_PATTERN = r"(?i)(?:https?://(?:dx\.)?doi\.org/|doi\s*:\s*|\\url\s*\{\s
 const URL_PATTERN = r"(?i)(?:\\url\s*\{\s*)?(https?://[^\s\}\]\"<>]+)"
 const ARXIV_PATTERN = r"(?i)(?:arxiv\s*[:/]\s*|arxiv\.org/(?:abs|pdf)/)(\d{4}\.\d{4,5}(?:v\d+)?)"
 const ADS_ARXIV_PATTERN = r"(?i)arxiv(\d{4})(\d{5})"
-const PMID_PATTERN = r"(?i)\b(?:pmid\s*:\s*)?(\d{6,9})\b"
+const PMID_PATTERN = r"(?i)\bpmid\s*:\s*(\d{6,9})\b"
 
 function dois_in_text(value::AbstractString)
     dois = String[]

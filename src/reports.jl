@@ -89,6 +89,22 @@ end
 function comparison_rows(reports::Vector{EntryReport})
     rows = NamedTuple[]
     for report in reports
+        if isempty(report.comparisons)
+            push!(rows, (
+                key=report.entry.key,
+                type=report.entry.type,
+                confidence=report.confidence,
+                field="",
+                importance="",
+                severity="red",
+                status="no_comparison",
+                bibtex="",
+                source="",
+                note=isempty(report.notes) ? "no comparison performed" : first(report.notes),
+                providers=join([s.provider for s in report.sources], ";"),
+            ))
+            continue
+        end
         for cmp in report.comparisons
             push!(rows, (
                 key=report.entry.key,

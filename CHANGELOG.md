@@ -38,6 +38,50 @@
   API responses are written to and read from a local directory to support
   repeat runs without re-querying providers.
 
+### Bug fixes (round 2)
+- Fixed `openlibrary_isbn_records`: author objects from the ISBN endpoint only
+  carry a key path (`/authors/OL1A`), not an inline name. Authors are now only
+  captured when the response includes an explicit `name` field, preventing
+  key-path strings from being used as author names and always failing comparison.
+- Fixed `normalize_pages` to collapse en-dashes (–) and em-dashes (—) to a
+  single ASCII hyphen, in addition to runs of ASCII hyphens. Real BibTeX page
+  ranges frequently contain Unicode dashes.
+- Fixed `PMID_PATTERN`: bare 6–9 digit numbers in `note`, `url`, and
+  `howpublished` fields were incorrectly extracted as PMIDs. The pattern now
+  requires an explicit `pmid:` prefix when extracting from free-text fields;
+  bare numbers are still accepted from a dedicated `pmid` field.
+- Fixed `arxiv_records`: direct entry-level title extraction now collapses
+  internal whitespace with `r"\s+" => " "`, matching the behaviour of
+  `arxiv_search_records` and preventing multi-line XML titles from being
+  returned with embedded newlines.
+- Fixed `source_identity`: notes now show the raw source title (truncated to
+  80 characters) instead of the normalized, punctuation-stripped form, making
+  log entries such as "best source: fixture (title:…)" readable.
+- Added docstring for `normalize_url`, consistent with all other normalization
+  functions in `normalize.jl`.
+- Fixed `comparison_rows` in `reports.jl`: entries with no field comparisons
+  (no source found, all sources rejected, all provider errors) now produce a
+  single summary row with `status = "no_comparison"` and `severity = "red"`.
+  Previously these entries were silently absent from the INC report.
+
+### Tests (round 2)
+- Added `normalize_url and urls_in_text` testset: DOI URL canonicalization,
+  scheme stripping, trailing slash/punctuation removal, `\url{}` wrapper
+  extraction, multiple-URL detection.
+- Added `field importance and comparison severity` testset: `:important`,
+  `:supplementary`, and `:ignored` field classification for articles and books;
+  `comparison_severity` for all status/importance combinations including
+  `:conflict`, `:missing_input`, `:missing_source`, `:ambiguous`, and ignored
+  fields.
+- Added `PMID text extraction requires explicit prefix` testset verifying that
+  bare numbers in notes are not extracted and that `pmid:` prefix and the
+  `pmid` field are both correctly handled.
+- Added assertion to `book and repository provider shapes` testset confirming
+  that `openlibrary_isbn_records` returns empty authors when only key paths are
+  present in the response.
+- Added assertion to `reports` testset verifying that entries with no
+  comparisons produce exactly one INC row with `status = "no_comparison"`.
+
 ### Bug fixes
 - Improved LaTeX title normalization for search and comparison: braces,
   TeX-style quotation marks, smart quotes, and formatting macros such as

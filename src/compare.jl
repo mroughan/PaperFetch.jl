@@ -272,7 +272,7 @@ function source_identity(source::SourceRecord)
     source.doi !== nothing && return "doi:" * normalize_doi(source.doi)
     !isempty(source.id) && return source.provider * ":" * source.id
     source.url !== nothing && return "url:" * source.url
-    source.title !== nothing && return "title:" * normalize_text(source.title)
+    source.title !== nothing && return "title:" * first(source.title, 80)
     return source.provider
 end
 

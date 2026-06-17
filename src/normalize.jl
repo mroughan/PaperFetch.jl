@@ -40,6 +40,24 @@ function normalize_doi(value::AbstractString)
     return lowercase(doi)
 end
 
+"""
+    normalize_url(value)
+
+Normalize a URL for tolerant comparison.
+
+DOI resolver URLs (`https://doi.org/10.x/y`, `https://dx.doi.org/10.x/y`) are
+canonicalized to `doi:<normalized-doi>`. Other URLs have their scheme stripped,
+trailing slashes removed, trailing punctuation (`.`, `)`) removed, and the
+result lowercased.
+
+# Example
+
+```julia
+normalize_url("https://doi.org/10.1000/ABC") == "doi:10.1000/abc"
+normalize_url("https://doi.org/10.1000/abc") == normalize_url("https://dx.doi.org/10.1000/ABC")
+normalize_url("https://example.org/") == "example.org"
+```
+"""
 function normalize_url(value::AbstractString)
     text = strip(value)
     text = replace(text, r"[.)]+$" => "")
@@ -82,13 +100,17 @@ end
 
 Normalize a page range to a single-hyphen form with no whitespace.
 
+Collapses runs of hyphens, en-dashes (–), and em-dashes (—) to a single
+ASCII hyphen.
+
 # Example
 
 ```julia
 normalize_pages("123 -- 130") == "123-130"
+normalize_pages("123–130") == "123-130"
 ```
 """
-normalize_pages(value::AbstractString) = replace(strip(value), r"\s+" => "", r"-+" => "-")
+normalize_pages(value::AbstractString) = replace(strip(value), r"\s+" => "", r"[–—-]+" => "-")
 
 """
     normalize_year(value)

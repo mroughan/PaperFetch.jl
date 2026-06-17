@@ -60,6 +60,123 @@ end
     @test score_missing <= 0.2
 end
 
+@testset "normalize_url and urls_in_text" begin
+    # DOI resolver URLs canonicalize to doi: form
+    @test PaperFetch.normalize_url("https://doi.org/10.1000/ABC") == "doi:10.1000/abc"
+    @test PaperFetch.normalize_url("https://dx.doi.org/10.1000/ABC") == "doi:10.1000/abc"
+    @test PaperFetch.normalize_url("https://doi.org/10.1000/abc") ==
+          PaperFetch.normalize_url("https://dx.doi.org/10.1000/ABC")
+
+    # Scheme stripped, trailing slashes removed
+    @test PaperFetch.normalize_url("https://example.org/") == "example.org"
+    @test PaperFetch.normalize_url("https://example.org") == "example.org"
+    @test PaperFetch.normalize_url("http://example.org/path") == "example.org/path"
+
+    # Trailing punctuation stripped
+    @test PaperFetch.normalize_url("https://example.org/page.") == "example.org/page"
+    @test PaperFetch.normalize_url("https://example.org/page)") == "example.org/page"
+
+    # Case folding
+    @test PaperFetch.normalize_url("HTTPS://Example.ORG/path") == "example.org/path"
+
+    # urls_in_text: plain URL
+    urls1 = PaperFetch.urls_in_text("See https://example.org/paper for details")
+    @test "https://example.org/paper" in urls1
+
+    # urls_in_text: \url{} wrapper
+    urls2 = PaperFetch.urls_in_text(raw"Archived at \url{https://example.org/report.pdf}.")
+    @test "https://example.org/report.pdf" in urls2
+
+    # urls_in_text: trailing punctuation stripped
+    urls3 = PaperFetch.urls_in_text("Available at https://example.org/paper.")
+    @test "https://example.org/paper" in urls3
+    @test !any(u -> endswith(u, "."), urls3)
+
+    # urls_in_text: multiple URLs
+    urls4 = PaperFetch.urls_in_text("See https://a.example.org and https://b.example.org")
+    @test "https://a.example.org" in urls4
+    @test "https://b.example.org" in urls4
+    @test length(urls4) == 2
+end
+
+@testset "field importance and comparison severity" begin
+    article = BibEntry("x", "article", Dict("title" => "T", "author" => "A",
+        "journal" => "J", "year" => "2020"))
+
+    # Required fields are :important
+    @test PaperFetch.field_importance(article, "title")   == :important
+    @test PaperFetch.field_importance(article, "author")  == :important
+    @test PaperFetch.field_importance(article, "journal") == :important
+    @test PaperFetch.field_importance(article, "year")    == :important
+
+    # Supplementary fields
+    @test PaperFetch.field_importance(article, "doi")   == :supplementary
+    @test PaperFetch.field_importance(article, "pages") == :supplementary
+
+    # Tool/metadata fields are :ignored
+    @test PaperFetch.field_importance(article, "abstract")  == :ignored
+    @test PaperFetch.field_importance(article, "keywords")  == :ignored
+    @test PaperFetch.field_importance(article, "file")      == :ignored
+    @test PaperFetch.field_importance(article, "timestamp") == :ignored
+
+    # Book has author/editor group and publisher as required
+    book = BibEntry("b", "book", Dict("title" => "T"))
+    @test PaperFetch.field_importance(book, "author")    == :important
+    @test PaperFetch.field_importance(book, "publisher") == :important
+    @test PaperFetch.field_importance(book, "isbn")      == :supplementary
+
+    # comparison_severity: exact/normalized/equivalent → green regardless of importance
+    for status in (:exact, :normalized, :equivalent)
+        @test PaperFetch.comparison_severity(article,
+            FieldComparison("title", status, "x", "x", "")) == :green
+        @test PaperFetch.comparison_severity(article,
+            FieldComparison("doi", status, "x", "x", "")) == :green
+    end
+
+    # conflict → always red
+    @test PaperFetch.comparison_severity(article,
+        FieldComparison("title", :conflict, "a", "b", "")) == :red
+    @test PaperFetch.comparison_severity(article,
+        FieldComparison("doi", :conflict, "a", "b", "")) == :red
+
+    # missing_input: important → red, supplementary → amber
+    @test PaperFetch.comparison_severity(article,
+        FieldComparison("title", :missing_input, nothing, "y", "")) == :red
+    @test PaperFetch.comparison_severity(article,
+        FieldComparison("doi", :missing_input, nothing, "y", "")) == :amber
+
+    # missing_source → amber regardless of importance
+    @test PaperFetch.comparison_severity(article,
+        FieldComparison("title", :missing_source, "x", nothing, "")) == :amber
+
+    # ambiguous → amber
+    @test PaperFetch.comparison_severity(article,
+        FieldComparison("title", :ambiguous, "x", "y", "")) == :amber
+
+    # ignored field → :ignored regardless of status
+    @test PaperFetch.comparison_severity(article,
+        FieldComparison("abstract", :conflict, "x", "y", "")) == :ignored
+    @test PaperFetch.comparison_severity(article,
+        FieldComparison("keywords", :exact, "x", "x", "")) == :ignored
+end
+
+@testset "PMID text extraction requires explicit prefix" begin
+    # Bare number in note should NOT be extracted as a PMID
+    e_bare = BibEntry("x", "article", Dict("note" => "Reference number 12345678"))
+    ids_bare = extract_identifiers(e_bare)
+    @test !any(id -> id.kind == :pmid, ids_bare)
+
+    # "pmid:" prefix in note should be extracted
+    e_prefix = BibEntry("y", "article", Dict("note" => "PMID: 12345678"))
+    ids_prefix = extract_identifiers(e_prefix)
+    @test any(id -> id.kind == :pmid && id.value == "12345678", ids_prefix)
+
+    # pmid field still works without prefix
+    e_field = BibEntry("z", "article", Dict("pmid" => "87654321"))
+    ids_field = extract_identifiers(e_field)
+    @test any(id -> id.kind == :pmid && id.value == "87654321", ids_field)
+end
+
 @testset "compare_value author mismatch" begin
     # Differing author strings should give :conflict, not :ambiguous
     cmp = PaperFetch.compare_value("author", "Smith, J.", "Jones, A.")
@@ -588,6 +705,8 @@ end
     isbn_sources = PaperFetch.openlibrary_isbn_records(provider, "978-3-16-148410-0")
     @test isbn_sources[1].title == "ISBN Book"
     @test isbn_sources[1].raw["isbn"] == "9783161484100"
+    # Open Library ISBN records only return {"key": "/authors/OL1A"} — no inline name
+    @test isempty(isbn_sources[1].authors)
 
     entry = BibEntry("book", "book", Dict("title" => "Search Book", "author" => "Search, Sally"))
     openlibrary_sources = PaperFetch.openlibrary_search_records(provider, entry)
@@ -663,6 +782,17 @@ end
     @test IncCSV.metadata(inc)["title"] == "PaperFetch bibliography validation report"
     rows = collect(IncCSV.table(inc))
     @test length(rows) >= 1
+
+    # Entries with no comparisons must still appear in the INC report
+    no_source_entry  = BibEntry("orphan", "misc", Dict("title" => "Unknown Reference"))
+    no_source_report = EntryReport(no_source_entry, SourceRecord[], FieldComparison[],
+        0.0, ["no source metadata found"], String[])
+    paths2 = write_reports([no_source_report], mktempdir())
+    rows2  = collect(IncCSV.table(IncCSV.readinc(paths2[:inc])))
+    @test length(rows2) == 1
+    @test rows2[1].key == "orphan"
+    @test rows2[1].status == "no_comparison"
+    @test rows2[1].severity == "red"
 end
 
 @testset "report checklist and key preservation" begin
