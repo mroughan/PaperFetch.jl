@@ -23,6 +23,15 @@
   lookup where an ISBN is present.
 - Added URL metadata inspection for `url`, `note`, and `howpublished` links,
   including direct PDF URL detection and citation meta-tag extraction.
+- Added Semantic Scholar API adapter for DOI lookup and title/author fallback
+  search.
+- Added PubMed / NCBI E-utilities adapter for DOI, PMID, and title/author
+  fallback search.
+- Added CORE API adapter for DOI and title/author search, with open-access PDF
+  candidate discovery when returned by CORE.
+- Added Figshare API adapter for DOI and title/author search, including
+  article-detail lookup for downloadable PDF files.
+- Added `TO_CONSIDER.md` to track optional future APIs and why they might help.
 
 ### Caching
 - Added `cache_dir` parameter to `ApiProvider` and `check_bibliography`;
@@ -32,6 +41,7 @@
 ### Bug fixes
 - Fixed DOI extraction from LaTeX `\url{...}` wrappers in misplaced fields
   such as `note`.
+- Added PMID extraction from `pmid`, `note`, `url`, and `howpublished` fields.
 - Fixed `sources_for(::ApiProvider, ...)` so entries with a DOI hidden in
   `note` or `url` still use the DOI-backed API path.
 - Fixed Open Library ISBN records to store ISBN provenance in `raw` rather than
@@ -70,6 +80,8 @@
 - Added provider tests for DOI-less article fallback search, book search,
   URL metadata extraction, direct PDF URL detection, and arXiv/URL/DOI recovery
   from non-standard fields.
+- Added provider tests for Semantic Scholar, PubMed, CORE, Figshare, and PMID
+  extraction using mocked API responses.
 - Added report tests for checklist symbols, field importance/severity columns,
   ignored fields such as `abstract`, and exact key preservation.
 - Added `normalization helpers` testset covering `normalize_pages`,

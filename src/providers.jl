@@ -201,8 +201,29 @@ function sources_for(provider::ApiProvider, entry::BibEntry)
                 key = rec.provider * ":" * id.value
                 key in seen || (push!(seen, key); push!(sources, rec))
             end
+            for rec in semantic_scholar_records(provider, id.value)
+                key = rec.provider * ":" * id.value
+                key in seen || (push!(seen, key); push!(sources, rec))
+            end
+            for rec in pubmed_records(provider, id.value)
+                key = rec.provider * ":" * id.value
+                key in seen || (push!(seen, key); push!(sources, rec))
+            end
+            for rec in core_records(provider, id.value)
+                key = rec.provider * ":" * id.value
+                key in seen || (push!(seen, key); push!(sources, rec))
+            end
+            for rec in figshare_records(provider, id.value)
+                key = rec.provider * ":" * id.value
+                key in seen || (push!(seen, key); push!(sources, rec))
+            end
         elseif id.kind == :arxiv
             for rec in arxiv_records(provider, id.value)
+                key = rec.provider * ":" * id.value
+                key in seen || (push!(seen, key); push!(sources, rec))
+            end
+        elseif id.kind == :pmid
+            for rec in pubmed_pmid_records(provider, id.value)
                 key = rec.provider * ":" * id.value
                 key in seen || (push!(seen, key); push!(sources, rec))
             end
@@ -418,6 +439,10 @@ function title_search_records(provider::ApiProvider, entry::BibEntry)
         append!(sources, crossref_search_records(provider, entry))
         append!(sources, openalex_search_records(provider, entry))
         append!(sources, arxiv_search_records(provider, entry))
+        append!(sources, semantic_scholar_search_records(provider, entry))
+        append!(sources, pubmed_search_records(provider, entry))
+        append!(sources, core_search_records(provider, entry))
+        append!(sources, figshare_search_records(provider, entry))
     end
     return sources
 end
@@ -509,6 +534,287 @@ function arxiv_search_records(provider::ApiProvider, entry::BibEntry)
         return records
     catch err
         return [SourceRecord(provider="arxiv-search-error", id=title,
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function semantic_scholar_record_from_item(item; provider_name::String)
+    authors = String[]
+    if hasproperty(item, :authors)
+        for author in item.authors
+            name = optional_string(author, :name)
+            name === nothing || push!(authors, name)
+        end
+    end
+    doi = nothing
+    if hasproperty(item, :externalIds) && item.externalIds !== nothing
+        doi = optional_string(item.externalIds, :DOI)
+    end
+    pdf_url = nothing
+    if hasproperty(item, :openAccessPdf) && item.openAccessPdf !== nothing
+        pdf_url = optional_string(item.openAccessPdf, :url)
+    end
+    venue = optional_string(item, :venue)
+    journal = venue
+    if hasproperty(item, :journal) && item.journal !== nothing
+        journal = optional_string(item.journal, :name)
+    end
+    return SourceRecord(provider=provider_name,
+        id=String(get(item, :paperId, "")),
+        title=optional_string(item, :title),
+        authors=authors,
+        year=hasproperty(item, :year) && item.year !== nothing ? string(item.year) : nothing,
+        doi=doi,
+        url=optional_string(item, :url),
+        journal=journal,
+        pdf_url=pdf_url)
+end
+
+function semantic_scholar_records(provider::ApiProvider, doi::AbstractString)
+    fields = "paperId,title,authors,year,externalIds,url,venue,journal,openAccessPdf"
+    url = "https://api.semanticscholar.org/graph/v1/paper/DOI:$(escapeuri(normalize_doi(doi)))?fields=$(fields)"
+    try
+        obj = provider_get_json(provider, url; headers=["User-Agent" => provider.user_agent])
+        return [semantic_scholar_record_from_item(obj; provider_name="semantic-scholar")]
+    catch err
+        return [SourceRecord(provider="semantic-scholar-error", id=normalize_doi(doi),
+            doi=normalize_doi(doi), raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function semantic_scholar_search_records(provider::ApiProvider, entry::BibEntry)
+    query = title_author_query(entry)
+    query === nothing && return SourceRecord[]
+    fields = "paperId,title,authors,year,externalIds,url,venue,journal,openAccessPdf"
+    url = "https://api.semanticscholar.org/graph/v1/paper/search?query=$(escapeuri(query))&limit=3&fields=$(fields)"
+    try
+        obj = provider_get_json(provider, url; headers=["User-Agent" => provider.user_agent])
+        hasproperty(obj, :data) || return SourceRecord[]
+        return [semantic_scholar_record_from_item(item; provider_name="semantic-scholar-search")
+            for item in obj.data]
+    catch err
+        return [SourceRecord(provider="semantic-scholar-search-error", id=query,
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function pubmed_summary_records(provider::ApiProvider, ids::Vector{String}; provider_name::String)
+    isempty(ids) && return SourceRecord[]
+    url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id=$(escapeuri(join(ids, ",")))&retmode=json&tool=PaperFetch&email=$(escapeuri(provider.email))"
+    obj = provider_get_json(provider, url; headers=["User-Agent" => provider.user_agent])
+    hasproperty(obj, :result) || return SourceRecord[]
+    records = SourceRecord[]
+    for id in ids
+        sid = Symbol(id)
+        hasproperty(obj.result, sid) || continue
+        item = getproperty(obj.result, sid)
+        authors = String[]
+        if hasproperty(item, :authors)
+            for author in item.authors
+                name = optional_string(author, :name)
+                name === nothing || push!(authors, name)
+            end
+        end
+        doi = nothing
+        if hasproperty(item, :articleids)
+            for articleid in item.articleids
+                idtype = lowercase(String(get(articleid, :idtype, "")))
+                idtype == "doi" && (doi = optional_string(articleid, :value))
+            end
+        end
+        journal = optional_string(item, :fulljournalname)
+        journal === nothing && (journal = optional_string(item, :source))
+        push!(records, SourceRecord(provider=provider_name,
+            id=id,
+            title=optional_string(item, :title),
+            authors=authors,
+            year=optional_string(item, :pubdate),
+            doi=doi,
+            url="https://pubmed.ncbi.nlm.nih.gov/$(id)/",
+            journal=journal,
+            pages=optional_string(item, :pages),
+            raw=Dict{String,Any}("pmid" => id)))
+    end
+    return records
+end
+
+function pubmed_search_ids(provider::ApiProvider, term::AbstractString)
+    url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=$(escapeuri(term))&retmode=json&retmax=3&tool=PaperFetch&email=$(escapeuri(provider.email))"
+    obj = provider_get_json(provider, url; headers=["User-Agent" => provider.user_agent])
+    if hasproperty(obj, :esearchresult) && hasproperty(obj.esearchresult, :idlist)
+        return String.(obj.esearchresult.idlist)
+    end
+    return String[]
+end
+
+function pubmed_records(provider::ApiProvider, doi::AbstractString)
+    clean = normalize_doi(doi)
+    try
+        ids = pubmed_search_ids(provider, clean * "[AID]")
+        return pubmed_summary_records(provider, ids; provider_name="pubmed")
+    catch err
+        return [SourceRecord(provider="pubmed-error", id=clean, doi=clean,
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function pubmed_pmid_records(provider::ApiProvider, pmid::AbstractString)
+    clean = replace(strip(pmid), r"[^0-9]" => "")
+    isempty(clean) && return SourceRecord[]
+    try
+        return pubmed_summary_records(provider, [clean]; provider_name="pubmed")
+    catch err
+        return [SourceRecord(provider="pubmed-error", id=clean,
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function pubmed_search_records(provider::ApiProvider, entry::BibEntry)
+    query = title_author_query(entry)
+    query === nothing && return SourceRecord[]
+    try
+        ids = pubmed_search_ids(provider, query)
+        return pubmed_summary_records(provider, ids; provider_name="pubmed-search")
+    catch err
+        return [SourceRecord(provider="pubmed-search-error", id=query,
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function core_record_from_item(item; provider_name::String)
+    authors = String[]
+    if hasproperty(item, :authors)
+        for author in item.authors
+            if author isa AbstractString
+                push!(authors, String(author))
+            else
+                name = optional_string(author, :name)
+                name === nothing || push!(authors, name)
+            end
+        end
+    end
+    doi = optional_string(item, :doi)
+    if doi === nothing && hasproperty(item, :identifiers)
+        for identifier in item.identifiers
+            text = String(identifier)
+            for found in dois_in_text(text)
+                doi = found
+                break
+            end
+            doi === nothing || break
+        end
+    end
+    pdf_url = optional_string(item, :downloadUrl)
+    pdf_url === nothing && (pdf_url = optional_string(item, :fullTextLink))
+    landing = nothing
+    if hasproperty(item, :sourceFulltextUrls) && !isempty(item.sourceFulltextUrls)
+        landing = String(first(item.sourceFulltextUrls))
+    end
+    return SourceRecord(provider=provider_name,
+        id=string(get(item, :id, "")),
+        title=optional_string(item, :title),
+        authors=authors,
+        year=hasproperty(item, :yearPublished) && item.yearPublished !== nothing ? string(item.yearPublished) : nothing,
+        doi=doi,
+        url=landing,
+        publisher=optional_string(item, :publisher),
+        pdf_url=pdf_url)
+end
+
+function core_search(provider::ApiProvider, query::AbstractString; provider_name::String)
+    url = "https://api.core.ac.uk/v3/search/works?q=$(escapeuri(query))&limit=3"
+    obj = provider_get_json(provider, url; headers=["User-Agent" => provider.user_agent])
+    hasproperty(obj, :results) || return SourceRecord[]
+    return [core_record_from_item(item; provider_name) for item in obj.results]
+end
+
+function core_records(provider::ApiProvider, doi::AbstractString)
+    clean = normalize_doi(doi)
+    try
+        return core_search(provider, "doi:\"" * clean * "\""; provider_name="core")
+    catch err
+        return [SourceRecord(provider="core-error", id=clean, doi=clean,
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function core_search_records(provider::ApiProvider, entry::BibEntry)
+    query = title_author_query(entry)
+    query === nothing && return SourceRecord[]
+    try
+        return core_search(provider, query; provider_name="core-search")
+    catch err
+        return [SourceRecord(provider="core-search-error", id=query,
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function figshare_article_record(provider::ApiProvider, article; provider_name::String)
+    id = string(get(article, :id, ""))
+    detail = article
+    if !isempty(id) && !hasproperty(article, :authors)
+        detail_url = "https://api.figshare.com/v2/articles/$(escapeuri(id))"
+        detail = provider_get_json(provider, detail_url; headers=["User-Agent" => provider.user_agent])
+    end
+    authors = String[]
+    if hasproperty(detail, :authors)
+        for author in detail.authors
+            name = optional_string(author, :full_name)
+            name === nothing && (name = optional_string(author, :name))
+            name === nothing || push!(authors, name)
+        end
+    end
+    doi = optional_string(detail, :doi)
+    pdf_url = nothing
+    if hasproperty(detail, :files)
+        for file in detail.files
+            download_url = optional_string(file, :download_url)
+            download_url !== nothing || continue
+            name = lowercase(String(get(file, :name, "")))
+            if endswith(name, ".pdf") || occursin("pdf", lowercase(String(get(file, :mime_type, ""))))
+                pdf_url = download_url
+                break
+            end
+        end
+    end
+    return SourceRecord(provider=provider_name,
+        id=id,
+        title=optional_string(detail, :title),
+        authors=authors,
+        year=optional_string(detail, :published_date),
+        doi=doi,
+        url=optional_string(detail, :url_public_html),
+        publisher="figshare",
+        pdf_url=pdf_url)
+end
+
+function figshare_search(provider::ApiProvider, query::AbstractString; provider_name::String)
+    url = "https://api.figshare.com/v2/articles/search?search_for=$(escapeuri(query))&limit=3"
+    obj = provider_get_json(provider, url; headers=["User-Agent" => provider.user_agent])
+    records = SourceRecord[]
+    for article in obj
+        push!(records, figshare_article_record(provider, article; provider_name))
+    end
+    return records
+end
+
+function figshare_records(provider::ApiProvider, doi::AbstractString)
+    clean = normalize_doi(doi)
+    try
+        return figshare_search(provider, clean; provider_name="figshare")
+    catch err
+        return [SourceRecord(provider="figshare-error", id=clean, doi=clean,
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
+function figshare_search_records(provider::ApiProvider, entry::BibEntry)
+    query = title_author_query(entry)
+    query === nothing && return SourceRecord[]
+    try
+        return figshare_search(provider, query; provider_name="figshare-search")
+    catch err
+        return [SourceRecord(provider="figshare-search-error", id=query,
             raw=Dict{String,Any}("error" => sprint(showerror, err)))]
     end
 end

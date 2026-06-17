@@ -21,6 +21,7 @@ end
 const DOI_PATTERN = r"(?i)(?:https?://(?:dx\.)?doi\.org/|doi\s*:\s*|\\url\s*\{\s*)?(10\.\d{4,9}/[^\s\}\]\"<>;,]+)"
 const URL_PATTERN = r"(?i)(?:\\url\s*\{\s*)?(https?://[^\s\}\]\"<>]+)"
 const ARXIV_PATTERN = r"(?i)(?:arxiv\s*[:/]\s*|arxiv\.org/(?:abs|pdf)/)(\d{4}\.\d{4,5}(?:v\d+)?)"
+const PMID_PATTERN = r"(?i)\b(?:pmid\s*:\s*)?(\d{6,9})\b"
 
 function dois_in_text(value::AbstractString)
     dois = String[]
@@ -44,6 +45,15 @@ end
 function arxiv_ids_in_text(value::AbstractString)
     ids = String[]
     for match in eachmatch(ARXIV_PATTERN, value)
+        id = strip(match.captures[1])
+        isempty(id) || id in ids || push!(ids, id)
+    end
+    return ids
+end
+
+function pmids_in_text(value::AbstractString)
+    ids = String[]
+    for match in eachmatch(PMID_PATTERN, value)
         id = strip(match.captures[1])
         isempty(id) || id in ids || push!(ids, id)
     end
@@ -108,6 +118,17 @@ function extract_identifiers(entry::BibEntry)
 
     isbn = get(entry.fields, "isbn", nothing)
     isbn !== nothing && add!(:isbn, isbn)
+
+    pmid = get(entry.fields, "pmid", nothing)
+    pmid !== nothing && add!(:pmid, pmid)
+
+    for field in ("url", "note", "howpublished")
+        value = get(entry.fields, field, nothing)
+        value === nothing && continue
+        for recovered in pmids_in_text(value)
+            add!(:pmid, recovered)
+        end
+    end
 
     for field in ("url", "note", "howpublished")
         value = get(entry.fields, field, nothing)

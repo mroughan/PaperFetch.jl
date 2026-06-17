@@ -162,6 +162,16 @@ end
             """)
         elseif occursin("api.openalex.org/works?search=", url)
             return JSON3.read("""{"results":[]}""")
+        elseif occursin("api.semanticscholar.org/graph/v1/paper/search", url)
+            return JSON3.read("""{"data":[]}""")
+        elseif occursin("eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi", url)
+            return JSON3.read("""{"esearchresult":{"idlist":[]}}""")
+        elseif occursin("eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi", url)
+            return JSON3.read("""{"result":{}}""")
+        elseif occursin("api.core.ac.uk/v3/search/works", url)
+            return JSON3.read("""{"results":[]}""")
+        elseif occursin("api.figshare.com/v2/articles/search", url)
+            return JSON3.read("""[]""")
         elseif occursin("openlibrary.org/search.json", url)
             return JSON3.read("""
             {"docs":[{
@@ -212,6 +222,125 @@ end
         source.publisher == "Library Press", book_sources)
     @test any(source -> source.provider == "google-books" &&
         source.publisher == "Google Press", book_sources)
+end
+
+@testset "additional provider adapters" begin
+    calls = String[]
+    function fake_json(url; headers=Pair{String,String}[])
+        push!(calls, url)
+        if occursin("api.crossref.org/works/", url)
+            return JSON3.read("{}")
+        elseif occursin("api.openalex.org/works/doi:", url)
+            return JSON3.read("{}")
+        elseif occursin("api.unpaywall.org", url)
+            return JSON3.read("{}")
+        elseif occursin("api.datacite.org", url)
+            return JSON3.read("{}")
+        elseif occursin("api.semanticscholar.org/graph/v1/paper/DOI:", url)
+            return JSON3.read("""
+            {
+              "paperId":"S2-1",
+              "title":"Extra API Paper",
+              "year":2024,
+              "authors":[{"name":"Sam Semantic"}],
+              "externalIds":{"DOI":"10.2222/extra"},
+              "url":"https://www.semanticscholar.org/paper/S2-1",
+              "venue":"API Journal",
+              "openAccessPdf":{"url":"https://example.org/semantic.pdf"}
+            }
+            """)
+        elseif occursin("api.semanticscholar.org/graph/v1/paper/search", url)
+            return JSON3.read("""
+            {"data":[{
+              "paperId":"S2-2",
+              "title":"Title Search Extra",
+              "year":2023,
+              "authors":[{"name":"Tara Title"}],
+              "externalIds":{"DOI":"10.2222/title"},
+              "url":"https://www.semanticscholar.org/paper/S2-2",
+              "venue":"Search Journal"
+            }]}
+            """)
+        elseif occursin("eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi", url)
+            return JSON3.read("""{"esearchresult":{"idlist":["12345678"]}}""")
+        elseif occursin("eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi", url)
+            return JSON3.read("""
+            {"result":{"12345678":{
+              "uid":"12345678",
+              "title":"PubMed Extra",
+              "pubdate":"2024 Jan",
+              "source":"PubMed Journal",
+              "fulljournalname":"PubMed Journal Expanded",
+              "pages":"1-2",
+              "authors":[{"name":"Pat PubMed"}],
+              "articleids":[{"idtype":"doi","value":"10.2222/pubmed"}]
+            }}}
+            """)
+        elseif occursin("api.core.ac.uk/v3/search/works", url)
+            return JSON3.read("""
+            {"results":[{
+              "id":987,
+              "title":"CORE Extra",
+              "authors":[{"name":"Cora Core"}],
+              "yearPublished":2022,
+              "doi":"10.2222/core",
+              "publisher":"Repository Press",
+              "downloadUrl":"https://example.org/core.pdf",
+              "sourceFulltextUrls":["https://example.org/core"]
+            }]}
+            """)
+        elseif occursin("api.figshare.com/v2/articles/search", url)
+            return JSON3.read("""[{"id":321,"title":"Figshare Extra"}]""")
+        elseif occursin("api.figshare.com/v2/articles/321", url)
+            return JSON3.read("""
+            {
+              "id":321,
+              "title":"Figshare Extra",
+              "doi":"10.2222/figshare",
+              "published_date":"2021-02-03T00:00:00Z",
+              "url_public_html":"https://figshare.com/articles/321",
+              "authors":[{"full_name":"Fiona Figshare"}],
+              "files":[{"name":"paper.pdf","mime_type":"application/pdf","download_url":"https://example.org/figshare.pdf"}]
+            }
+            """)
+        else
+            return JSON3.read("{}")
+        end
+    end
+    fake_text(url; headers=Pair{String,String}[]) = "<feed></feed>"
+
+    provider = PaperFetch.ApiProvider(get_json=fake_json, get_text=fake_text)
+    doi_entry = BibEntry("extra_doi", "article", Dict(
+        "doi" => "10.2222/extra",
+        "title" => "Extra API Paper",
+    ))
+    doi_sources = PaperFetch.sources_for(provider, doi_entry)
+    @test any(source -> source.provider == "semantic-scholar" &&
+        source.pdf_url == "https://example.org/semantic.pdf", doi_sources)
+    @test any(source -> source.provider == "pubmed" &&
+        source.doi == "10.2222/pubmed", doi_sources)
+    @test any(source -> source.provider == "core" &&
+        source.pdf_url == "https://example.org/core.pdf", doi_sources)
+    @test any(source -> source.provider == "figshare" &&
+        source.pdf_url == "https://example.org/figshare.pdf", doi_sources)
+
+    pmid_entry = BibEntry("pmid_entry", "article", Dict(
+        "pmid" => "12345678",
+        "title" => "PubMed Extra",
+    ))
+    pmid_ids = extract_identifiers(pmid_entry)
+    @test any(id -> id.kind == :pmid && id.value == "12345678", pmid_ids)
+    pmid_sources = PaperFetch.sources_for(provider, pmid_entry)
+    @test any(source -> source.provider == "pubmed" &&
+        source.url == "https://pubmed.ncbi.nlm.nih.gov/12345678/", pmid_sources)
+
+    title_entry = BibEntry("title_extra", "article", Dict(
+        "title" => "Title Search Extra",
+        "author" => "Title, Tara",
+    ))
+    title_sources = PaperFetch.sources_for(provider, title_entry)
+    @test any(source -> source.provider == "semantic-scholar-search" &&
+        source.doi == "10.2222/title", title_sources)
 end
 
 @testset "URL metadata and direct PDF lookup" begin
