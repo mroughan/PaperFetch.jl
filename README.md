@@ -1,7 +1,7 @@
 # PaperFetch.jl
 
 [![CI](https://github.com/mroughan/PaperFetch.jl/actions/workflows/ci.yml/badge.svg)](https://github.com/mroughan/PaperFetch.jl/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/mroughan/PaperFetch.jl/branch/main/graph/badge.svg?the worst perturbations)](https://codecov.io/gh/mroughan/PaperFetch.jl)
+[![codecov](https://codecov.io/gh/mroughan/PaperFetch.jl/branch/main/graph/badge.svg?token=kB2yzGMO9c)](https://codecov.io/gh/mroughan/PaperFetch.jl)
 [![JET](https://github.com/mroughan/PaperFetch.jl/actions/workflows/jet.yml/badge.svg)](https://github.com/mroughan/PaperFetch.jl/actions/workflows/jet.yml)
 [![Aqua](https://github.com/mroughan/PaperFetch.jl/actions/workflows/aqua.yml/badge.svg)](https://github.com/mroughan/PaperFetch.jl/actions/workflows/aqua.yml)
 [![Documentation](https://github.com/mroughan/PaperFetch.jl/actions/workflows/documenter.yml/badge.svg)](https://github.com/mroughan/PaperFetch.jl/actions/workflows/documenter.yml)
