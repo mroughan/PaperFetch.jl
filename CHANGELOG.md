@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Reports
+- Added a documentation page explaining Markdown report flags, field comparison
+  flags, entry-type-specific required fields, normalization behavior, and fetch
+  manifests.
+- Reworked Markdown reports to reduce redundant checklist text. Each entry now
+  has a compact general-flags table for source discovery, provider errors,
+  required fields, comparison availability, PDF candidates, and confidence.
+  Field-level review flags now appear as a `Flag` column in the field
+  comparison table alongside importance, status, BibTeX value, source value,
+  and diagnostic note.
+- `@inproceedings` and related proceedings/chapter entries now compare the
+  container title as `booktitle`, not `journal`, in the default field
+  comparison set.
+- `@book` and related chapter entries with an `editor` but no `author` now
+  compare the creator field as `editor`, rather than reporting a missing
+  `author`.
+
+### Validation transparency
+- `check_bibliography` now emits a clear `@warn` when it falls back to
+  `CandidateProvider` (no fixture, no explicit `providers`, `use_apis=false`),
+  since that fallback only echoes each entry's own title/doi/url back as its
+  "source" and cannot validate anything against an independent record.
+- `compare_entry` now adds an explicit note to the `EntryReport` itself in
+  that same situation, so the limitation is visible in the generated
+  Markdown/INC report, not only in a log line a reader may not see.
+
 ### Architecture
 - Split monolithic `src/PaperFetch.jl` into focused include files:
   `normalize.jl`, `bib.jl`, `identifiers.jl`, `providers.jl`, `compare.jl`,
@@ -37,6 +63,39 @@
 - Added `cache_dir` parameter to `ApiProvider` and `check_bibliography`;
   API responses are written to and read from a local directory to support
   repeat runs without re-querying providers.
+
+### Bug fixes (round 4)
+- Fixed `pubmed_search_ids`: NCBI returns `idlist:[]` (not an omitted field)
+  for any search with zero hits, which is the common case for non-biomedical
+  DOIs. JSON3 parses an empty JSON array with no element-type hint as eltype
+  `Union{}`, so `String.(...)` over it produced a `Vector{Union{}}` instead of
+  `Vector{String}`. That failed to dispatch on
+  `pubmed_summary_records(::ApiProvider, ::Vector{String}; ...)`, so every
+  non-biomedical lookup was silently converted into a spurious
+  `pubmed-error`/`pubmed-search-error` source carrying a `MethodError`
+  instead of cleanly reporting "no PubMed hit". Switched to an explicitly
+  `String[...]`-typed comprehension so the empty case stays `Vector{String}`.
+- Fixed misleading "year" reason in `compare_entry`'s discarded-candidate
+  notes: the diagnostic listed "year" as a hard-mismatch reason whenever a
+  publication-year gap existed at all, even a gap of 0 or 1 that does not
+  meet the actual hard-mismatch threshold (`>=2`, or `>=3` for books). Added
+  `year_hard_mismatch` and reused it both in `source_hard_mismatch` and in the
+  note-building code so the explanation always matches the real cutoff.
+
+### Bug fixes (round 3)
+- Fixed `sources_for(::ApiProvider, ...)`: an identifier such as a DOI that
+  resolved successfully but pointed at the wrong work (mistyped or swapped
+  DOI) previously suppressed the title/author search fallback, because the
+  fallback only ran when *no* usable source was found at all. Added
+  `identifier_source_conflicts` (reusing the same hard-mismatch comparison as
+  `compare_entry`) so the fallback also runs when every identifier-resolved
+  source hard-mismatches the entry's title or author, letting the package find
+  the correct work under a different DOI.
+- Improved `compare_entry` diagnostics: discarded hard-mismatch candidates are
+  now reported in `EntryReport.notes` even when a reliable replacement source
+  is found, and an explicit note is added when the chosen best source was
+  found via title/author search under a DOI different from the one in the
+  bibliography, so the inconsistency stays visible to the reviewer.
 
 ### Bug fixes (round 2)
 - Fixed `openlibrary_isbn_records`: author objects from the ISBN endpoint only

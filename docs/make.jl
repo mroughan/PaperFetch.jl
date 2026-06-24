@@ -20,6 +20,7 @@ makedocs(;
         "Home" => "index.md",
         "Examples" => "examples.md",
         "Live Providers" => "providers.md",
+        "Reports and Manifests" => "reports.md",
         "Stand-Alone Executable" => "standalone.md",
         "API Reference" => "api.md",
     ],

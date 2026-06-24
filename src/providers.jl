@@ -5,6 +5,10 @@
 
 Metadata about a work returned by an API, fixture, or landing-page adapter.
 
+`authors` stores the creator list returned by the provider. For edited books
+and book chapters this may be compared with a BibTeX `editor` field when the
+entry has no `author` field.
+
 # Example
 
 ```julia
@@ -293,13 +297,43 @@ function sources_for(provider::ApiProvider, entry::BibEntry)
             end
         end
     end
-    if isempty(filter(!source_is_error, sources))
+    usable = filter(!source_is_error, sources)
+    # An identifier such as a DOI can resolve successfully yet point at the
+    # wrong work (e.g. a mistyped or swapped DOI). When every usable record
+    # found via explicit identifiers hard-mismatches the entry's title or
+    # author, fall back to a title/author search so a correctly-identified
+    # source with a different identifier can still be found and reported.
+    identifier_lookup_unreliable = !isempty(usable) &&
+        all(rec -> identifier_source_conflicts(entry, rec), usable)
+    if isempty(usable) || identifier_lookup_unreliable
         for rec in title_search_records(provider, entry)
             key = rec.provider * ":" * source_identity(rec)
             key in seen || (push!(seen, key); push!(sources, rec))
         end
     end
     return sources
+end
+
+"""
+    identifier_source_conflicts(entry, source)
+
+Return `true` when `source` (typically found by resolving an explicit
+identifier such as a DOI) has a title or author that hard-mismatches `entry`,
+or a publication year far enough away to indicate a different edition.
+
+This reuses the same field comparisons as [`compare_entry`](@ref) so the
+"does this look like the same work" judgement is made consistently whether the
+mismatch is caught at provider-selection time or at report time.
+"""
+function identifier_source_conflicts(entry::BibEntry, source::SourceRecord)
+    comparisons = FieldComparison[]
+    for field in ("title", "author")
+        input_value  = value_from_entry(entry, field)
+        source_value = value_from_source(source, field)
+        input_value === nothing && source_value === nothing && continue
+        push!(comparisons, compare_value(field, input_value, source_value))
+    end
+    return source_hard_mismatch(entry, source, comparisons)
 end
 
 function deduplicate_sources(sources::Vector{SourceRecord})
@@ -729,7 +763,12 @@ function pubmed_search_ids(provider::ApiProvider, term::AbstractString)
     url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=$(escapeuri(term))&retmode=json&retmax=3&tool=PaperFetch&email=$(escapeuri(provider.email))"
     obj = provider_get_json(provider, url; headers=["User-Agent" => provider.user_agent])
     if hasproperty(obj, :esearchresult) && hasproperty(obj.esearchresult, :idlist)
-        return String.(obj.esearchresult.idlist)
+        # `String.(...)` on a JSON3 array with zero elements infers eltype
+        # `Union{}` (not `String`), which then fails to dispatch on
+        # `pubmed_summary_records(::ApiProvider, ::Vector{String}; ...)`. An
+        # explicitly-typed comprehension keeps the result `Vector{String}`
+        # even when empty, which is the common case for non-biomedical works.
+        return String[String(id) for id in obj.esearchresult.idlist]
     end
     return String[]
 end

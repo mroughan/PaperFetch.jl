@@ -26,6 +26,10 @@ end
 
 Review result for a single bibliography entry.
 
+`notes` contains entry-level diagnostics such as provider errors, discarded
+candidate sources, and warnings about self-comparison fallback. Field-level
+diagnostics live in `comparisons`.
+
 # Example
 
 ```julia
@@ -120,10 +124,12 @@ function value_from_source(source::SourceRecord, field::AbstractString)
     field == "doi"       && return source.doi
     field == "url"       && return source.url
     field == "journal"   && return source.journal
+    field == "booktitle" && return source.journal
     field == "pages"     && return source.pages
     field == "publisher" && return source.publisher
     field == "year"      && return source.year
     field == "author"    && return isempty(source.authors) ? nothing : join(source.authors, " and ")
+    field == "editor"    && return isempty(source.authors) ? nothing : join(source.authors, " and ")
     return nothing
 end
 
@@ -172,7 +178,9 @@ function compare_value(field::String, input::Union{Nothing,String}, source::Unio
         status = left == right ? (input == source ? :exact : :normalized) : :conflict
         note = left == right ? "URLs match after DOI URL canonicalization" : "URLs differ"
         return FieldComparison(field, status, input, source, note)
-    elseif field == "author"
+    elseif field in ("author", "editor")
+        label = field == "editor" ? "editor" : "author"
+        plural_label = label * "s"
         left, right = normalize_authors(input), normalize_authors(source)
         left_unordered, right_unordered = normalize_authors_unordered(input), normalize_authors_unordered(source)
         input_truncated = occursin(r"(?i)\bet\.?\s+al\.?", input)
@@ -193,16 +201,16 @@ function compare_value(field::String, input::Union{Nothing,String}, source::Unio
             :conflict
         end
         note = if status in (:exact, :equivalent)
-            "authors are equivalent after name normalization"
+            "$(plural_label) are equivalent after name normalization"
         elseif status == :ambiguous &&
                 (left_unordered == right_unordered || author_signatures_match_unordered(input, source))
-            "author names match but order differs; manual review required"
+            "$(label) names match but order differs; manual review required"
         elseif status == :ambiguous && (input_truncated || source_truncated)
-            "author list appears truncated with et al.; manual review required"
+            "$(label) list appears truncated with et al.; manual review required"
         elseif status == :ambiguous
-            "author strings are close but not identical; possible spelling difference"
+            "$(label) strings are close but not identical; possible spelling difference"
         else
-            "author strings differ after normalization; manual review required"
+            "$(label) strings differ after normalization; manual review required"
         end
         return FieldComparison(field, status, input, source, note)
     else
@@ -238,21 +246,19 @@ function year_gap(left::Union{Nothing,String}, right::Union{Nothing,String})
     return abs(parse(Int, a) - parse(Int, b))
 end
 
+function year_hard_mismatch(entry::BibEntry, source::SourceRecord)
+    gap = year_gap(get(entry.fields, "year", nothing), source.year)
+    gap === nothing && return false
+    return lowercase(entry.type) == "book" ? gap >= 3 : gap >= 2
+end
+
 function source_hard_mismatch(entry::BibEntry, source::SourceRecord, comparisons::Vector{FieldComparison})
     for cmp in comparisons
-        if cmp.field in ("title", "author") && cmp.status == :conflict
+        if cmp.field in ("title", "author", "editor") && cmp.status == :conflict
             return true
         end
     end
-    gap = year_gap(get(entry.fields, "year", nothing), source.year)
-    if gap !== nothing
-        if lowercase(entry.type) == "book" && gap >= 3
-            return true
-        elseif lowercase(entry.type) != "book" && gap >= 2
-            return true
-        end
-    end
-    return false
+    return year_hard_mismatch(entry, source)
 end
 
 function comparison_score(comparisons)
@@ -274,6 +280,15 @@ function comparison_score(comparisons)
     return round(total / length(comparisons); digits=3)
 end
 
+function default_comparison_fields(entry::BibEntry)
+    t = lowercase(entry.type)
+    container_field = t in ("inproceedings", "conference", "incollection", "inbook") ?
+        "booktitle" : "journal"
+    creator_field = haskey(entry.fields, "editor") && !haskey(entry.fields, "author") &&
+        t in ("book", "inbook", "incollection") ? "editor" : "author"
+    return ["doi", "title", creator_field, "year", container_field, "pages", "publisher", "url"]
+end
+
 function source_identity(source::SourceRecord)
     source.doi !== nothing && return "doi:" * normalize_doi(source.doi)
     !isempty(source.id) && return source.provider * ":" * source.id
@@ -283,9 +298,17 @@ function source_identity(source::SourceRecord)
 end
 
 """
-    compare_entry(entry, sources; fields=["doi","title","author","year","journal","pages","publisher","url"])
+    compare_entry(entry, sources; fields=nothing)
 
 Compare one `BibEntry` with candidate source records and return an `EntryReport`.
+
+By default, proceedings and chapter-style entries compare their container as
+`booktitle`; articles compare `journal`. Books and chapter-style entries with
+an `editor` but no `author` compare `editor` as the creator field.
+
+The comparison is tolerant for bibliographic formatting, but conflicts are still
+reported explicitly. DOI values must match after DOI normalization. Author and
+editor names use the same normalization, including accents and initials.
 
 # Example
 
@@ -294,9 +317,16 @@ entry = BibEntry("x", "article", Dict("doi" => "10.1000/x", "title" => "A"))
 source = SourceRecord(provider="fixture", doi="10.1000/x", title="A")
 compare_entry(entry, [source]).confidence == 1.0
 ```
+
+```julia
+book = BibEntry("edited", "book", Dict("editor" => "Example, Erin", "title" => "Edited"))
+src = SourceRecord(provider="fixture", title="Edited", authors=["Erin Example"])
+any(cmp -> cmp.field == "editor", compare_entry(book, [src]).comparisons)
+```
 """
 function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
-        fields = ["doi", "title", "author", "year", "journal", "pages", "publisher", "url"])
+        fields = nothing)
+    comparison_fields = fields === nothing ? default_comparison_fields(entry) : fields
     if isempty(sources)
         return EntryReport(entry, SourceRecord[], FieldComparison[], 0.0,
             ["no source metadata found"], String[])
@@ -310,11 +340,22 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
         return EntryReport(entry, sources, FieldComparison[], 0.0, notes, String[])
     end
 
+    # The `CandidateProvider` fallback (used when no fixture, explicit
+    # provider, or `use_apis=true` is configured) only ever returns the
+    # entry's own title/doi/url echoed back as a "source". Comparing an entry
+    # against itself cannot detect an incorrect doi, title, or author, so make
+    # that limitation explicit in the report rather than letting it look like
+    # an independently-verified match.
+    self_comparison_only = all(s -> s.provider == "input", usable_sources)
+    self_comparison_note = "no external metadata provider was queried for this entry; " *
+        "it was compared only against its own bibliography fields (title/doi/url), so " *
+        "this result cannot detect an incorrect doi, title, or author"
+
     candidates = NamedTuple[]
 
     for source in usable_sources
         comparisons = FieldComparison[]
-        for field in fields
+        for field in comparison_fields
             input_value  = value_from_entry(entry, field)
             source_value = value_from_source(source, field)
             input_value === nothing && source_value === nothing && continue
@@ -330,16 +371,22 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
     end
 
     reliable_candidates = filter(candidate -> candidate.reliable, candidates)
+
+    discarded_notes = String[]
+    for candidate in candidates
+        candidate.reliable && continue
+        reasons = [cmp.field for cmp in candidate.comparisons
+            if cmp.field in ("title", "author", "editor") && cmp.status == :conflict]
+        year_hard_mismatch(entry, candidate.source) && push!(reasons, "year")
+        isempty(reasons) || push!(discarded_notes,
+            "discarded $(candidate.source.provider) ($(source_identity(candidate.source))): " *
+            "hard mismatch in $(join(unique(reasons), ", "))")
+    end
+
     if isempty(reliable_candidates)
         notes = String["no reliable source metadata found"]
-        for candidate in candidates
-            reasons = [cmp.field for cmp in candidate.comparisons
-                if cmp.field in ("title", "author") && cmp.status == :conflict]
-            gap = year_gap(get(entry.fields, "year", nothing), candidate.source.year)
-            gap !== nothing && push!(reasons, "year")
-            isempty(reasons) || push!(notes,
-                "discarded $(candidate.source.provider): hard mismatch in $(join(unique(reasons), ", "))")
-        end
+        self_comparison_only && push!(notes, self_comparison_note)
+        append!(notes, discarded_notes)
         for source in provider_errors
             push!(notes, "provider error: $(source.provider) $(get(source.raw, "error", ""))")
         end
@@ -352,6 +399,19 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
     best_score       = best.score
 
     notes = String["best source: $(best_source.provider) ($(source_identity(best_source)))"]
+    self_comparison_only && push!(notes, self_comparison_note)
+    entry_doi = nonempty(get(entry.fields, "doi", nothing))
+    if entry_doi !== nothing
+        entry_doi_norm = normalize_doi(entry_doi)
+        best_doi_norm  = best_source.doi === nothing ? nothing : normalize_doi(best_source.doi)
+        if best_doi_norm != entry_doi_norm &&
+                any(c -> c.source.doi !== nothing && normalize_doi(c.source.doi) == entry_doi_norm, candidates)
+            push!(notes, "doi $(entry_doi) in the bibliography does not match this entry's " *
+                "title/author; the best matching source was instead found by title/author " *
+                "search and uses a different doi")
+        end
+    end
+    append!(notes, discarded_notes)
     for source in provider_errors
         push!(notes, "provider error: $(source.provider) $(get(source.raw, "error", ""))")
     end

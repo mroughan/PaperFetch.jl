@@ -73,9 +73,20 @@ function download_pdf(url::String, dest::String; cookies::Dict{String,String}=Di
     ctype = lowercase(String(HTTP.header(response, "Content-Type", "")))
     looks_pdf = occursin("pdf", ctype) || (length(body) >= 4 && body[1:4] == UInt8['%','P','D','F'])
     if !(200 <= response.status < 300)
-        return false, actual, "HTTP $(response.status)", nothing, 0
+        detail = if response.status in (401, 403)
+            " (possible paywall or access restriction)"
+        elseif response.status == 404
+            " (candidate not found)"
+        elseif response.status >= 500
+            " (remote server error)"
+        else
+            ""
+        end
+        return false, actual, "HTTP $(response.status)$(detail)", nothing, 0
     elseif !looks_pdf
-        return false, actual, "not a PDF; content-type=$(ctype)", nothing, length(body)
+        detail = occursin("html", ctype) ?
+            " (received HTML, possibly a landing/login/paywall page)" : ""
+        return false, actual, "not a PDF; content-type=$(ctype)$(detail)", nothing, length(body)
     end
     mkpath(dirname(dest))
     tmp, io = mktemp(dirname(dest))
@@ -121,13 +132,107 @@ function write_manifest(path::AbstractString, results::Vector{FetchResult})
     return path
 end
 
+function fetch_result_summary(results::Vector{FetchResult})
+    for result in results
+        result.status == "downloaded" && return result
+    end
+    isempty(results) && return nothing
+    failed = filter(result -> result.status == "failed", results)
+    isempty(failed) || return last(failed)
+    return last(results)
+end
+
+function fetch_diagnostic(result::Union{Nothing,FetchResult}, attempts::Vector{FetchResult})
+    result === nothing && return "no fetch attempt recorded"
+    if result.status == "downloaded"
+        source = something(result.source_url, "")
+        return isempty(source) ? "downloaded" : "downloaded from $(source)"
+    elseif result.status == "failed"
+        failed_count = count(attempt -> attempt.status == "failed", attempts)
+        prefix = failed_count > 1 ? "all $(failed_count) PDF candidates failed" : "PDF candidate failed"
+        return "$(prefix): $(result.note)"
+    elseif result.status == "skipped"
+        return result.note
+    end
+    return result.note
+end
+
+function manifest_key(key::AbstractString)
+    text = String(key)
+    return length(text) > 12 ? first(text, 12) * "..." : text
+end
+
+function manifest_reference_title(report::EntryReport)
+    title = get(report.entry.fields, "title", report.entry.key)
+    normalized = normalize_text(String(title))
+    return isempty(normalized) ? String(title) : normalized
+end
+
+function report_has_url(entry::BibEntry)
+    for field in ("url", "howpublished")
+        value = get(entry.fields, field, nothing)
+        value === nothing && continue
+        occursin(r"https?://"i, String(value)) && return true
+    end
+    return false
+end
+
+function no_pdf_reason(report::EntryReport)
+    notes = isempty(report.notes) ? "" : join(report.notes, "; ")
+    type = lowercase(report.entry.type)
+    has_url = report_has_url(report.entry)
+    has_doi = haskey(report.entry.fields, "doi")
+    if type in ("online", "www") || (type == "misc" && has_url && !has_doi)
+        return "no PDF candidate; entry appears to be an online web page, not a PDF document"
+    elseif isempty(report.sources) || any(note -> occursin("no source metadata", note), report.notes)
+        return "no PDF candidate; source metadata could not be found"
+    elseif any(note -> occursin("no reliable source metadata", note), report.notes)
+        return "no PDF candidate; source metadata could not be verified"
+    elseif any(source_is_error, report.sources)
+        return isempty(notes) ? "no PDF candidate; provider lookup failed" :
+            "no PDF candidate; provider lookup failed: $(notes)"
+    elseif !isempty(report.sources)
+        return "no PDF candidate; source metadata did not report an open-access PDF URL; access may be paywalled or landing-page only"
+    end
+    return "no PDF candidate"
+end
+
+function write_manifest_markdown(path::AbstractString, reports::Vector{EntryReport},
+        results::Vector{FetchResult})
+    bykey = Dict{String,Vector{FetchResult}}()
+    for result in results
+        push!(get!(bykey, result.key, FetchResult[]), result)
+    end
+    open(path, "w") do io
+        println(io, "# PaperFetch Fetch Manifest\n")
+        println(io, "Generated: $(Dates.now())\n")
+        println(io, "| Key | Reference | Status | File | Source URL | Diagnostic |")
+        println(io, "| --- | --- | --- | --- | --- | --- |")
+        for report in reports
+            attempts = get(bykey, report.entry.key, FetchResult[])
+            result = fetch_result_summary(attempts)
+            title = manifest_reference_title(report)
+            status = result === nothing ? "unknown" : result.status
+            file = result === nothing ? "" : something(result.file, "")
+            source_url = result === nothing ? "" : something(result.source_url, "")
+            diagnostic = fetch_diagnostic(result, attempts)
+            println(io, "| $(markdown_escape(manifest_key(report.entry.key))) | $(markdown_escape(title)) | " *
+                "$(markdown_escape(status)) | $(markdown_escape(file)) | " *
+                "$(markdown_escape(source_url)) | $(markdown_escape(diagnostic)) |")
+        end
+    end
+    return path
+end
+
 """
     fetch_pdfs(reports, outdir; cookie_file=nothing, ezproxy=nothing)
 
-Download PDF candidates from reports and write an INC manifest.
+Download PDF candidates from reports and write INC and Markdown manifests.
 
 Only explicit PDF candidate URLs are attempted. Missing PDFs are recorded as
-`skipped`, not as validation failures.
+`skipped`, not as validation failures. The function returns the fetch results
+and the path to `manifest.inc`; `manifest.md` is written in the same directory
+for human review.
 
 # Example
 
@@ -135,7 +240,7 @@ Only explicit PDF candidate URLs are attempted. Missing PDFs are recorded as
 entry = BibEntry("x", "misc", Dict("title" => "No PDF"))
 report = EntryReport(entry, SourceRecord[], FieldComparison[], 0.0, String[], String[])
 results, manifest = fetch_pdfs([report], mktempdir())
-results[1].status == "skipped"
+results[1].status == "skipped" && basename(manifest) == "manifest.inc"
 ```
 """
 function fetch_pdfs(reports::Vector{EntryReport}, outdir::AbstractString;
@@ -147,7 +252,7 @@ function fetch_pdfs(reports::Vector{EntryReport}, outdir::AbstractString;
     for report in reports
         if isempty(report.pdf_candidates)
             push!(results, FetchResult(report.entry.key, "skipped", nothing, nothing, nothing,
-                "no PDF candidate", nothing, 0))
+                no_pdf_reason(report), nothing, 0))
             continue
         end
         base = slugify(get(report.entry.fields, "title", report.entry.key))
@@ -169,5 +274,6 @@ function fetch_pdfs(reports::Vector{EntryReport}, outdir::AbstractString;
         _ = downloaded
     end
     manifest = write_manifest(joinpath(outdir, "manifest.inc"), results)
+    write_manifest_markdown(joinpath(outdir, "manifest.md"), reports, results)
     return results, manifest
 end

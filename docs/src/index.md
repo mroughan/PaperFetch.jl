@@ -37,6 +37,11 @@ table with metadata, suitable for spreadsheets and downstream tooling. CLI
 report names default to the input file stem; pass `--report-basename NAME` to
 choose a different basename.
 
+Markdown reports preserve the original BibTeX keys. Each entry has a compact
+general-flags table for source discovery, provider errors, required fields, PDF
+candidates, and confidence, followed by a field comparison table with a `Flag`
+column for green, amber, red, or ignored review signals.
+
 ## Julia API Tutorial
 
 ```julia
@@ -65,8 +70,9 @@ Fetch mode uses explicit PDF candidate URLs from source metadata:
 results, manifest = fetch_pdfs(reports, "paperfetch_out")
 ```
 
-Entries without PDF candidates are recorded as `skipped`, not as validation
-failures.
+This writes `manifest.md`, a human-readable table of references and fetch
+diagnostics, plus `manifest.inc` for spreadsheet and tooling use. Entries
+without PDF candidates are recorded as `skipped`, not as validation failures.
 
 ## Design Commitments
 
@@ -74,6 +80,10 @@ failures.
 - DOI and similar identifiers use exact normalized comparison.
 - Titles, authors, pages, journal names, and other bibliographic text are
   compared with documented normalization.
+- Edited books may use `editor` instead of `author`; proceedings and chapter
+  entries compare their container as `booktitle`.
+- URLs found in `note` or `howpublished`, including LaTeX `\url{...}` macros,
+  can be matched to source URL metadata.
 - URL normalization preserves path and query case while canonicalizing DOI
   resolver links and HTTP(S) hosts.
 - Author order is treated as meaningful. Reordered author lists are marked for

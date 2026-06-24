@@ -229,6 +229,73 @@ end
     @test note_url_cmp.input == "https://example.org/report.pdf"
 end
 
+@testset "inproceedings compares booktitle not journal" begin
+    entry = BibEntry("conf2024", "inproceedings", Dict(
+        "author" => "Example, Erin",
+        "title" => "Conference Paper",
+        "booktitle" => "Proceedings of the Example Conference",
+        "year" => "2024",
+    ))
+    source = SourceRecord(provider="fixture",
+        title="Conference Paper",
+        authors=["Erin Example"],
+        year="2024",
+        journal="Proceedings of the Example Conference")
+
+    report = compare_entry(entry, [source])
+    compared_fields = [cmp.field for cmp in report.comparisons]
+    @test "booktitle" in compared_fields
+    @test !("journal" in compared_fields)
+
+    booktitle_cmp = only(filter(cmp -> cmp.field == "booktitle", report.comparisons))
+    @test booktitle_cmp.status in (:exact, :normalized, :equivalent)
+    @test PaperFetch.field_importance(entry, "booktitle") == :important
+    @test PaperFetch.comparison_severity(entry, booktitle_cmp) == :green
+end
+
+@testset "book compares editor when author is absent" begin
+    entry = BibEntry("edited2024", "book", Dict(
+        "editor" => "Example, Erin and Sample, Sam",
+        "title" => "Edited Book",
+        "publisher" => "Example Press",
+        "year" => "2024",
+    ))
+    source = SourceRecord(provider="fixture",
+        title="Edited Book",
+        authors=["Erin Example", "Sam Sample"],
+        year="2024",
+        publisher="Example Press")
+
+    report = compare_entry(entry, [source])
+    compared_fields = [cmp.field for cmp in report.comparisons]
+    @test "editor" in compared_fields
+    @test !("author" in compared_fields)
+
+    editor_cmp = only(filter(cmp -> cmp.field == "editor", report.comparisons))
+    @test editor_cmp.status in (:exact, :equivalent)
+    @test PaperFetch.field_importance(entry, "editor") == :important
+    @test PaperFetch.comparison_severity(entry, editor_cmp) == :green
+end
+
+@testset "documented API report examples" begin
+    book = BibEntry("edited", "book", Dict("editor" => "Example, Erin", "title" => "Edited"))
+    src = SourceRecord(provider="fixture", title="Edited", authors=["Erin Example"])
+    @test any(cmp -> cmp.field == "editor", compare_entry(book, [src]).comparisons)
+
+    no_pdf = EntryReport(BibEntry("doc_no_pdf", "misc", Dict("title" => "No PDF")),
+        SourceRecord[], FieldComparison[], 0.0, String[], String[])
+    outdir = mktempdir()
+    paths = write_reports([no_pdf], outdir; basename="documented")
+    @test basename(paths[:markdown]) == "documented.md"
+    @test basename(paths[:inc]) == "documented.inc"
+
+    results, manifest = fetch_pdfs([no_pdf], outdir; http_get=(_url, _headers; _kwargs...) ->
+        error("no PDF candidate should be requested"))
+    @test results[1].status == "skipped"
+    @test basename(manifest) == "manifest.inc"
+    @test isfile(joinpath(outdir, "manifest.md"))
+end
+
 @testset "BibTeX and plain input" begin
     entries = read_bibtex(example("01_exact_article.bib"); check=:none)
     @test length(entries) == 1
@@ -388,6 +455,60 @@ end
         source.publisher == "Library Press", book_sources)
     @test any(source -> source.provider == "google-books" &&
         source.publisher == "Google Press", book_sources)
+end
+
+@testset "incorrect DOI is detected and the correct paper is found by title search" begin
+    function fake_json(url; headers=Pair{String,String}[])
+        if occursin("api.crossref.org/works/10.1111", url)
+            # Direct DOI lookup: the DOI in the bibliography resolves, but to
+            # an unrelated work (e.g. a mistyped or swapped DOI).
+            return JSON3.read("""
+            {"message":{
+              "DOI":"10.1111/wrong-doi",
+              "title":["Totally Different Paper"],
+              "author":[{"given":"Nobody","family":"Real"}],
+              "issued":{"date-parts":[[1990]]},
+              "URL":"https://doi.org/10.1111/wrong-doi"
+            }}
+            """)
+        elseif occursin("api.crossref.org/works?query.bibliographic=", url)
+            # Title/author search: the correctly-identified work, under a
+            # different DOI.
+            return JSON3.read("""
+            {"message":{"items":[{
+              "DOI":"10.2222/correct",
+              "title":["Correct Paper Title"],
+              "author":[{"given":"Erin","family":"Example"}],
+              "URL":"https://doi.org/10.2222/correct",
+              "container-title":["Journal of Checks"],
+              "page":"1-10",
+              "publisher":"Example Press"
+            }]}}
+            """)
+        else
+            error("unexpected url $url")
+        end
+    end
+    fake_text(url; headers=Pair{String,String}[]) = error("unexpected url $url")
+
+    provider = PaperFetch.ApiProvider(get_json=fake_json, get_text=fake_text)
+    entry = BibEntry("wrongdoi2023example", "article", Dict(
+        "doi" => "10.1111/wrong-doi",
+        "title" => "Correct Paper Title",
+        "author" => "Example, Erin",
+        "year" => "2023",
+    ))
+
+    sources = PaperFetch.sources_for(provider, entry)
+    @test any(s -> s.provider == "crossref" && s.title == "Totally Different Paper", sources)
+    @test any(s -> s.provider == "crossref-search" && s.doi == "10.2222/correct", sources)
+
+    report = compare_entry(entry, sources)
+    @test report.confidence > 0.0
+    @test occursin("crossref-search", report.notes[1])
+    @test any(n -> occursin("discarded crossref", n) && occursin("title", n), report.notes)
+    @test any(n -> occursin("does not match", n) && occursin("different doi", n), report.notes)
+    @test any(cmp -> cmp.field == "doi" && cmp.status == :conflict, report.comparisons)
 end
 
 @testset "additional provider adapters" begin
@@ -584,6 +705,18 @@ end
     ))
     book_report = compare_entry(book, [old_book, current_book])
     @test occursin("book-current", book_report.notes[1])
+
+    # A discarded candidate's diagnostic note must only blame "year" when the
+    # gap is large enough to actually count as a hard mismatch (matching
+    # `year_hard_mismatch`'s threshold), not whenever any gap exists at all.
+    matching_year_but_wrong_author = SourceRecord(provider="fixture-wrong-author",
+        title="Surreal numbers with derivation, Hardy fields and transseries: a survey",
+        authors=["Someone Else"],
+        year="2017")
+    near_year_report = compare_entry(entry, [matching_year_but_wrong_author, good])
+    discarded = only(filter(n -> occursin("fixture-wrong-author", n), near_year_report.notes))
+    @test occursin("author", discarded)
+    @test !occursin("year", discarded)
 end
 
 @testset "URL metadata and direct PDF lookup" begin
@@ -675,6 +808,22 @@ end
     @test first(PaperFetch.openlibrary_isbn_records(failing, "9783161484100")).provider == "openlibrary-error"
     @test first(PaperFetch.google_books_records(failing, "title")).provider == "google-books-error"
     @test first(PaperFetch.url_records(failing, "https://example.org/page", BibEntry("x", "misc", Dict()))).provider == "url-error"
+end
+
+@testset "pubmed search with zero hits does not error" begin
+    # NCBI returns idlist:[] (not omitted) when a term has no matches, which
+    # is the common case for any non-biomedical DOI. JSON3 parses an empty
+    # JSON array with no element-type hint as eltype Union{}, and
+    # `String.(...)` over it used to produce a `Vector{Union{}}` that failed
+    # to dispatch on `pubmed_summary_records(::ApiProvider, ::Vector{String})`,
+    # turning every non-biomedical lookup into a spurious "pubmed-error".
+    no_hits = PaperFetch.ApiProvider(
+        get_json=(url; headers=Pair{String,String}[]) -> JSON3.read(
+            """{"esearchresult":{"idlist":[]}}"""))
+    @test PaperFetch.pubmed_search_ids(no_hits, "10.1109/tc.2010.154[AID]") == String[]
+    @test isempty(PaperFetch.pubmed_records(no_hits, "10.1109/tc.2010.154"))
+    entry = BibEntry("x", "article", Dict("title" => "No PubMed Hit", "author" => "A, B"))
+    @test isempty(PaperFetch.pubmed_search_records(no_hits, entry))
 end
 
 @testset "book and repository provider shapes" begin
@@ -808,7 +957,7 @@ end
     @test rows2[1].severity == "red"
 end
 
-@testset "report checklist and key preservation" begin
+@testset "report flags and key preservation" begin
     entry = BibEntry("foo_bar-2024", "article", Dict(
         "author" => "Example, Erin",
         "title" => "Almost Correct Title",
@@ -825,6 +974,12 @@ end
     md = read(paths[:markdown], String)
 
     @test occursin("## foo_bar-2024", md)
+    @test occursin("General flags:", md)
+    @test occursin("| Flag | Status | Diagnostic |", md)
+    @test occursin("| Flag | Field | Importance | Status | BibTeX | Source | Note |", md)
+    @test !occursin("\nChecklist:", md)
+    @test occursin("Required fields", md)
+    @test occursin("Source metadata", md)
     @test occursin("✅", md)
     @test occursin("⚠️", md)
     @test occursin("`publisher` is missing from BibTeX", md)
@@ -851,6 +1006,13 @@ end
 
     results, manifest = fetch_pdfs(reports, outdir; http_get=fake_get)
     @test isfile(manifest)
+    manifest_md = joinpath(outdir, "manifest.md")
+    @test isfile(manifest_md)
+    md = read(manifest_md, String)
+    @test occursin("| Key | Reference | Status | File | Source URL | Diagnostic |", md)
+    @test occursin("doe2020exact", md)
+    @test occursin("a small study of bibliography checking", md)
+    @test occursin("downloaded from https://example.org/papers/exact.pdf", md)
     @test any(result -> result.status == "downloaded", results)
     downloaded = first(result for result in results if result.status == "downloaded")
     @test isfile(downloaded.file)
@@ -858,8 +1020,43 @@ end
 
     no_pdf_entry  = BibEntry("no_pdf", "misc", Dict("title" => "No PDF"))
     no_pdf_report = EntryReport(no_pdf_entry, SourceRecord[], FieldComparison[], 0.0, String[], String[])
-    skipped, _    = fetch_pdfs([no_pdf_report], mktempdir(); http_get=fake_get)
+    skipped_outdir = mktempdir()
+    skipped, _    = fetch_pdfs([no_pdf_report], skipped_outdir; http_get=fake_get)
     @test skipped[1].status == "skipped"
+    skipped_md = read(joinpath(skipped_outdir, "manifest.md"), String)
+    @test occursin("no_pdf", skipped_md)
+    @test occursin("no PDF candidate", skipped_md)
+    @test occursin("source metadata could not be found", skipped_md)
+
+    web_entry = BibEntry("very_long_online_reference_key", "online",
+        Dict("title" => "{Project} Documentation!", "url" => "https://example.org/docs"))
+    web_report = EntryReport(web_entry, SourceRecord[], FieldComparison[], 0.0, String[], String[])
+    web_outdir = mktempdir()
+    fetch_pdfs([web_report], web_outdir; http_get=fake_get)
+    web_md = read(joinpath(web_outdir, "manifest.md"), String)
+    @test occursin("very_long_on...", web_md)
+    @test !occursin("very_long_online_reference_key", web_md)
+    @test occursin("project documentation", web_md)
+    @test occursin("online web page, not a PDF document", web_md)
+
+    failing_report = EntryReport(BibEntry("bad_pdf", "misc", Dict("title" => "Bad PDF")),
+        SourceRecord[], FieldComparison[], 0.0, String[], ["https://example.org/not.pdf"])
+    fail_get(_url, _headers; _kwargs...) =
+        HTTP.Response(200, ["Content-Type" => "text/html"], body=Vector{UInt8}("<html></html>"))
+    fail_outdir = mktempdir()
+    failed, _ = fetch_pdfs([failing_report], fail_outdir; http_get=fail_get)
+    @test failed[1].status == "failed"
+    failed_md = read(joinpath(fail_outdir, "manifest.md"), String)
+    @test occursin("PDF candidate failed", failed_md)
+    @test occursin("not a PDF", failed_md)
+    @test occursin("landing/login/paywall page", failed_md)
+
+    notfound_get(_url, _headers; _kwargs...) =
+        HTTP.Response(404, ["Content-Type" => "text/html"], body=Vector{UInt8}("not found"))
+    missing_outdir = mktempdir()
+    missing, _ = fetch_pdfs([failing_report], missing_outdir; http_get=notfound_get)
+    @test missing[1].status == "failed"
+    @test occursin("candidate not found", read(joinpath(missing_outdir, "manifest.md"), String))
 end
 
 @testset "cookie and proxy helpers" begin
@@ -958,6 +1155,7 @@ end
     @test isfile(joinpath(outdir, "nopdf.md"))
     @test isfile(joinpath(outdir, "nopdf.inc"))
     @test isfile(joinpath(outdir, "manifest.inc"))
+    @test isfile(joinpath(outdir, "manifest.md"))
     rows = collect(IncCSV.table(IncCSV.readinc(joinpath(outdir, "manifest.inc"))))
     @test rows[1].status == "skipped"
 
@@ -979,4 +1177,31 @@ end
     @test string_reports[1].entry.key == "real_key"
     all_reports = check_bibliography(bib; check=:none, ignore_keys=nothing)
     @test length(all_reports) == 2
+end
+
+@testset "offline fallback warns and the report notes the limitation" begin
+    dir = mktempdir()
+    bib = joinpath(dir, "offline.bib")
+    write(bib, """
+    @article{offline2024, title={Offline Entry}, author={A, B}, year={2024}, doi={10.1000/offline}}
+    """)
+    # With no fixture, no explicit providers, and use_apis=false, the only
+    # "source" available is CandidateProvider's echo of the entry's own
+    # title/doi/url. That cannot validate anything, so a clear @warn must
+    # fire and the report must say so, rather than silently looking like a
+    # verified match.
+    reports = Test.@test_logs (:warn, r"fully offline"i) check_bibliography(bib; check=:none)
+    @test length(reports) == 1
+    @test any(note -> occursin("no external metadata provider was queried", note), reports[1].notes)
+
+    # The same warning and note must not appear when a fixture is supplied,
+    # since that is a deliberate, deterministic offline run rather than an
+    # accidental one.
+    fixture = joinpath(dir, "fixture.json")
+    write(fixture, """
+    {"records":[{"provider":"fixture","doi":"10.1000/offline","title":"Offline Entry",
+      "authors":["A B"],"year":"2024"}]}
+    """)
+    fixture_reports = Test.@test_logs check_bibliography(bib; fixture, check=:none)
+    @test !any(note -> occursin("no external metadata provider was queried", note), fixture_reports[1].notes)
 end

@@ -26,6 +26,7 @@ important than maximal throughput.
    URL, or file led to the observation.
 6. Handle real-world bibliography messiness without treating every textual
    difference as an error.
+7. Prefer slow and accurate analysis.
 
 ## Non-Goals
 

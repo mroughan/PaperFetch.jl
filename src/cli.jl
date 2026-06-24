@@ -43,6 +43,10 @@ end
 
 Command-line entry point.
 
+`check` writes Markdown and INC reports. `fetch` also writes `manifest.inc`,
+`manifest.md`, and any successfully downloaded PDFs. Report basenames default
+to the input file stem unless `--report-basename` is supplied.
+
 # Example
 
 ```julia
@@ -79,6 +83,7 @@ function main(args=ARGS)
             cookie_file = options["cookie-file"],
             ezproxy     = options["ezproxy"])
         println("Wrote: $(manifest)")
+        println("Wrote: $(joinpath(options["outdir"], "manifest.md"))")
     end
     return nothing
 end

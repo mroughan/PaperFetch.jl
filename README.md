@@ -30,10 +30,14 @@ or separate AI-assisted editing task can improve the bibliography deliberately.
   page ranges, Unicode/LaTeX accents, DOI URL variants, author initials, and
   similar harmless differences. URL paths and queries keep their case, and
   reordered author lists are flagged for review rather than silently accepted.
+- Uses entry-type-aware comparisons: proceedings and chapter entries compare
+  `booktitle`, and edited books can use `editor` instead of `author`.
+- Matches URLs found in `url`, `note`, or `howpublished`, including LaTeX
+  `\url{...}` forms, when checking URL-backed references.
 - Writes Markdown and INC reports; INC is a spreadsheet-friendly CSV-like format
   handled by IncCSV.jl.
-- Optionally downloads PDFs from explicit PDF candidate URLs and writes a fetch
-  manifest.
+- Optionally downloads PDFs from explicit PDF candidate URLs and writes fetch
+  manifests.
 
 ## What PaperFetch Does Not Do
 
@@ -82,6 +86,11 @@ The Markdown report is meant for direct reading. The INC report is meant for
 spreadsheets and downstream tooling. CLI report names default to the input file
 stem; pass `--report-basename NAME` to choose a different basename.
 
+Each Markdown entry keeps the original BibTeX key, then shows general flags for
+source discovery, provider errors, required fields, PDF candidates, and
+confidence. Field-by-field comparisons include a `Flag` column so green, amber,
+red, and ignored review signals are visible next to the relevant value.
+
 ## Live API Checks
 
 Live provider lookup is opt-in:
@@ -120,11 +129,17 @@ Outputs include:
 
 - `paperfetch_out/references.md`
 - `paperfetch_out/references.inc`
+- `paperfetch_out/manifest.md`
 - `paperfetch_out/manifest.inc`
 - downloaded `*.pdf` files when candidate URLs are available and reachable
 
-Entries without PDF candidates are recorded as `skipped`, not as validation
-failures.
+`manifest.md` is the human-readable fetch table. `manifest.inc` is the
+spreadsheet/tooling manifest. Entries without PDF candidates are recorded as
+`skipped`, not as validation failures.
+
+The manifest records the reference key, compact title, fetch status, local file
+when downloaded, source URL, and a short diagnostic such as "no PDF candidate",
+"downloaded from ...", or a failed HTTP/content-type reason.
 
 ## Credential-Assisted Fetching
 
@@ -173,6 +188,8 @@ paths[:inc]
 results, manifest = fetch_pdfs(reports, "paperfetch_out")
 ```
 
+This writes both `paperfetch_out/manifest.md` and `paperfetch_out/manifest.inc`.
+
 For deterministic offline runs, pass a fixture instead of live APIs:
 
 ```julia
@@ -210,7 +227,8 @@ julia --project=. test/online/runtests.jl
 ## Documentation
 
 The documentation includes a quickstart, examples, API reference, and notes on
-live providers, caching, rate limiting, and building a stand-alone executable:
+live providers, report formats, fetch manifests, caching, rate limiting, and
+building a stand-alone executable:
 
 https://mroughan.github.io/PaperFetch.jl/dev
 

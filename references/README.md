@@ -37,5 +37,7 @@ Downloaded on: 2026-06-15
 ## Uncertainties
 
 - Provider APIs can change. The API adapters in `src/PaperFetch.jl` are small
-  and tested offline with fixtures, but live Crossref, OpenAlex, and Unpaywall
-  behavior should be checked before relying on network mode for production use.
+  and tested offline with fixtures, but live Crossref, OpenAlex, Unpaywall,
+  DataCite, arXiv, Semantic Scholar, PubMed, CORE, Figshare, Open Library,
+  Google Books, and landing-page behavior should be checked before relying on
+  network mode for production use.

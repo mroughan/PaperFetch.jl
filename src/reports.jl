@@ -10,6 +10,10 @@ function checklist_symbol(severity::Symbol)
     return "•"
 end
 
+function flag_text(severity::Symbol)
+    return "$(checklist_symbol(severity)) $(severity)"
+end
+
 function field_group_label(group)
     return join(["`$(field)`" for field in group], " or ")
 end
@@ -20,38 +24,86 @@ function entry_has_field(entry::BibEntry, field::AbstractString)
     return !isempty(strip(String(value)))
 end
 
-function checklist_items(report::EntryReport)
-    items = NamedTuple[]
+function missing_required_field_groups(report::EntryReport)
+    missing = Vector{Vector{String}}()
     for group in required_field_groups(report.entry.type)
         present = any(field -> entry_has_field(report.entry, field), group)
-        push!(items, (
-            severity = present ? :green : :red,
-            field = join(group, "/"),
-            message = present ?
-                "Required field $(field_group_label(group)) is present" :
-                "Required field $(field_group_label(group)) is missing",
-        ))
+        present || push!(missing, group)
     end
-    for cmp in report.comparisons
-        severity = comparison_severity(report.entry, cmp)
-        severity == :ignored && continue
-        importance = field_importance(report.entry, cmp.field)
-        message = if severity == :green
-            "`$(cmp.field)` matches source metadata ($(cmp.status))"
-        elseif cmp.status == :conflict
-            "`$(cmp.field)` conflicts with source metadata: $(cmp.note)"
-        elseif cmp.status == :missing_input
-            "`$(cmp.field)` is missing from BibTeX ($(importance))"
-        elseif cmp.status == :missing_source
-            "`$(cmp.field)` could not be verified from source metadata"
-        elseif cmp.status == :ambiguous
-            "`$(cmp.field)` needs manual review: $(cmp.note)"
-        else
-            "`$(cmp.field)` needs review: $(cmp.note)"
-        end
-        push!(items, (severity=severity, field=cmp.field, message=message))
+    return missing
+end
+
+function general_flag_items(report::EntryReport)
+    items = NamedTuple[]
+    usable_sources = filter(!source_is_error, report.sources)
+    error_sources = filter(source_is_error, report.sources)
+    missing_required = missing_required_field_groups(report)
+
+    source_severity = if !isempty(usable_sources)
+        :green
+    elseif isempty(report.sources)
+        :red
+    else
+        :amber
     end
+    source_message = if !isempty(usable_sources)
+        "source metadata found from $(join(unique([s.provider for s in usable_sources]), ", "))"
+    elseif isempty(report.sources)
+        "no source metadata was found"
+    else
+        "only provider errors were returned"
+    end
+    push!(items, (flag="Source metadata", severity=source_severity, message=source_message))
+
+    provider_message = isempty(error_sources) ?
+        "no provider errors recorded" :
+        "provider errors from $(join(unique([s.provider for s in error_sources]), ", "))"
+    push!(items, (flag="Provider errors", severity=isempty(error_sources) ? :green : :amber,
+        message=provider_message))
+
+    required_message = isempty(missing_required) ?
+        "all required field groups are present" :
+        "missing required field group(s): " *
+            join([field_group_label(group) for group in missing_required], "; ")
+    push!(items, (flag="Required fields", severity=isempty(missing_required) ? :green : :red,
+        message=required_message))
+
+    comparison_message = isempty(report.comparisons) ?
+        "no field comparisons were possible" :
+        "$(length(report.comparisons)) field comparison(s) made"
+    push!(items, (flag="Field comparisons", severity=isempty(report.comparisons) ? :red : :green,
+        message=comparison_message))
+
+    pdf_message = isempty(report.pdf_candidates) ?
+        "no PDF candidate found; this is not necessarily an error" :
+        "$(length(report.pdf_candidates)) PDF candidate(s) found"
+    push!(items, (flag="PDF candidates", severity=isempty(report.pdf_candidates) ? :amber : :green,
+        message=pdf_message))
+
+    confidence_severity = report.confidence >= 0.8 ? :green :
+        report.confidence > 0 ? :amber : :red
+    push!(items, (flag="Confidence", severity=confidence_severity,
+        message="confidence score $(report.confidence)"))
+
     return items
+end
+
+function field_flag_note(entry::BibEntry, cmp::FieldComparison)
+    severity = comparison_severity(entry, cmp)
+    severity == :ignored && return ""
+    importance = field_importance(entry, cmp.field)
+    if severity == :green
+        return "`$(cmp.field)` matches source metadata ($(cmp.status))"
+    elseif cmp.status == :conflict
+        return "`$(cmp.field)` conflicts with source metadata: $(cmp.note)"
+    elseif cmp.status == :missing_input
+        return "`$(cmp.field)` is missing from BibTeX ($(importance))"
+    elseif cmp.status == :missing_source
+        return "`$(cmp.field)` could not be verified from source metadata"
+    elseif cmp.status == :ambiguous
+        return "`$(cmp.field)` needs manual review: $(cmp.note)"
+    end
+    return "`$(cmp.field)` needs review: $(cmp.note)"
 end
 
 function write_markdown(path::AbstractString, reports::Vector{EntryReport})
@@ -65,14 +117,23 @@ function write_markdown(path::AbstractString, reports::Vector{EntryReport})
             for note in report.notes
                 println(io, "- Note: $(note)")
             end
-            println(io, "\nChecklist:")
-            for item in checklist_items(report)
-                println(io, "- $(checklist_symbol(item.severity)) $(item.message)")
+            println(io, "\nGeneral flags:")
+            println(io, "\n| Flag | Status | Diagnostic |")
+            println(io, "| --- | --- | --- |")
+            for item in general_flag_items(report)
+                println(io, "| $(markdown_escape(item.flag)) | $(markdown_escape(flag_text(item.severity))) | $(markdown_escape(item.message)) |")
             end
-            println(io, "\n| Field | Status | BibTeX | Source | Note |")
-            println(io, "| --- | --- | --- | --- | --- |")
+            println(io, "\n| Flag | Field | Importance | Status | BibTeX | Source | Note |")
+            println(io, "| --- | --- | --- | --- | --- | --- | --- |")
             for cmp in report.comparisons
-                println(io, "| $(cmp.field) | $(cmp.status) | $(markdown_escape(cmp.input)) | $(markdown_escape(cmp.source)) | $(markdown_escape(cmp.note)) |")
+                severity = comparison_severity(report.entry, cmp)
+                importance = field_importance(report.entry, cmp.field)
+                note = field_flag_note(report.entry, cmp)
+                isempty(note) && (note = cmp.note)
+                println(io, "| $(markdown_escape(flag_text(severity))) | $(markdown_escape(cmp.field)) | " *
+                    "$(markdown_escape(importance)) | $(markdown_escape(cmp.status)) | " *
+                    "$(markdown_escape(cmp.input)) | $(markdown_escape(cmp.source)) | " *
+                    "$(markdown_escape(note)) |")
             end
             if !isempty(report.pdf_candidates)
                 println(io, "\nPDF candidates:")
@@ -156,6 +217,10 @@ Write Markdown and INC reports for `reports`.
 The default basename is `paperfetch_report` for direct API calls. CLI-generated
 reports use the input file stem unless `--report-basename` is supplied. Pass
 `basename` explicitly when a different output name is needed.
+
+Markdown reports include entry-level general flags and field-level comparison
+flags. INC reports contain one row per compared field, or one red
+`no_comparison` row when no source comparison was possible.
 
 # Example
 

@@ -40,17 +40,27 @@ PaperFetch.jl chooses lookup routes from the identifiers and entry type it can
 see:
 
 - DOI-backed entries can use Crossref, OpenAlex, Unpaywall, DataCite, Semantic
-  Scholar, PubMed, CORE, and Figshare.
+  Scholar, PubMed, CORE, and Figshare. DOI strings can be recovered from the
+  `doi` field, DOI resolver URLs, and common misplaced fields such as `note`,
+  `url`, and `howpublished`.
 - arXiv identifiers use the arXiv API.
 - PMID values use PubMed.
 - ISBN-backed books can use Open Library and Google Books.
-- Entries with only a title can use title-and-author search.
+- Entries with only a title, or entries whose identifier resolves to an
+  obviously different work, can use title-and-author fallback search.
 - URL-backed entries can check the URL and read common citation metadata from
-  the landing page.
+  the landing page. URLs can be taken from `url`, `note`, or `howpublished`,
+  including LaTeX `\url{...}` macros.
 
 Provider results are candidates, not automatic truth. The report records
 agreement, conflicts, missing fields, and provider errors so a person can decide
 what should be fixed in the original BibTeX.
+
+Book-like entries are handled with their expected fields. Proceedings and
+chapter entries compare `booktitle` rather than `journal`; edited books can
+compare `editor` as the creator when no `author` field is present. A large year
+gap for a book is treated as evidence that a provider may have returned a
+different edition.
 
 ## Caching And Rate Limiting
 

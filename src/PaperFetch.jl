@@ -37,18 +37,28 @@ end
 Read a bibliography, collect source metadata, and return one `EntryReport` per
 entry.
 
+The input file is not edited. Reports preserve the original BibTeX keys and are
+intended to guide a human or a separate editing step.
+
 Provider selection order:
 1. A `FixtureProvider` is added when `fixture` is set.
 2. Explicitly supplied `providers` are appended.
 3. An `ApiProvider` is added when `use_apis=true`. It can query Crossref,
    OpenAlex, Unpaywall, DataCite, arXiv, Semantic Scholar, PubMed, CORE,
    Figshare, Open Library, Google Books, and URL landing pages as appropriate.
-4. If still empty, a `CandidateProvider` is used as a read-only fallback.
+4. If still empty, a `CandidateProvider` is used as a read-only fallback that
+   only echoes each entry's own title/doi/url back as its "source". This
+   cannot detect an incorrect doi, title, or author. A `@warn` is emitted when
+   this fallback is used, and affected `EntryReport`s carry a matching note.
 
 Set `cache_dir` to a directory path to cache API responses between runs.
 Set `rate_limit_seconds` to the minimum delay between uncached live API
 requests made by the default `ApiProvider`. Set `ignore_keys=nothing` to keep
 all entries, including review artifacts such as `anon`.
+
+Identifier recovery is deliberately forgiving: DOI, arXiv, PMID, ISBN, and URL
+values can be extracted from standard fields and common misplaced fields such as
+`note` and `howpublished`. Later comparison remains explicit about conflicts.
 
 # Example
 
@@ -79,7 +89,14 @@ function check_bibliography(path::AbstractString;
         push!(active, ApiProvider(email=email, cache_dir=cache_dir,
             rate_limit_seconds=Float64(rate_limit_seconds)))
     end
-    isempty(active) && push!(active, CandidateProvider())
+    if isempty(active)
+        @warn "check_bibliography is running fully offline: no fixture, no explicit " *
+              "providers, and use_apis=false. Entries will only be compared against " *
+              "their own bibliography fields and cannot be validated against any " *
+              "independent source metadata. Pass fixture=<path> for a deterministic " *
+              "offline run, or use_apis=true to query live scholarly APIs."
+        push!(active, CandidateProvider())
+    end
     return [compare_entry(entry, provider_sources(active, entry)) for entry in entries]
 end
 

@@ -80,9 +80,10 @@ end
 
 Extract normalized `WorkIdentifier` values from a `BibEntry`.
 
-Checks for DOI, arXiv eprint (when `archiveprefix` is `arXiv`), ISBN, and URL
-fields in that priority order. DOI-like strings are also recovered from common
-wrong fields such as `note`, `url`, and `howpublished`.
+Checks for DOI, arXiv eprint (when `archiveprefix` is `arXiv`), ISBN, PMID,
+and URL fields in that priority order. DOI-like strings, arXiv identifiers, and
+URLs are also recovered from common misplaced fields such as `note`,
+`howpublished`, and LaTeX `\\url{...}` macros.
 
 # Example
 

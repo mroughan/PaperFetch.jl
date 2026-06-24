@@ -54,6 +54,15 @@ Not every bibliography item is a journal article or has a PDF:
 PaperFetch.jl records the absence of a PDF candidate as a fetch status, not as
 a bibliography error.
 
+Book-like entries use book-specific fields during comparison. `@inbook` and
+`@incollection` compare container metadata as `booktitle`, and `@book`,
+`@inbook`, and `@incollection` entries can use `editor` as the creator field
+when no `author` field is present.
+
+URL-backed examples may place URLs in either `url` or common prose fields such
+as `note` and `howpublished`. LaTeX `\url{...}` macros are normalized before
+comparison.
+
 ## Plain DOI Lists
 
 Plain text input is also accepted:
@@ -77,6 +86,7 @@ julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
   --email your.email@example.edu \
   --use-apis \
   --cache-dir .paperfetch_cache \
+  --rate-limit-seconds 0.05 \
   --outdir paperfetch_out
 ```
 
@@ -102,3 +112,8 @@ julia --project=. test/online/runtests.jl
 The online runner checks that each example returns at least one non-error
 source, has an exact normalized DOI match, writes reports, and finds at least
 one PDF candidate across the set.
+
+The generated Markdown report uses entry-level general flags plus field-level
+flags in the comparison table. Fetch mode also writes `manifest.md` and
+`manifest.inc`, which are the best first place to inspect why a PDF did or did
+not download.
