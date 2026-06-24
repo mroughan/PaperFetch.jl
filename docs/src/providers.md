@@ -5,6 +5,11 @@ checks use fixture metadata or the bibliography itself as the candidate source.
 Live checks use public scholarly APIs and landing-page metadata to gather
 candidate records for comparison.
 
+A fixture is a local JSON file containing known source metadata. Fixtures are
+used for examples, tests, and repeatable offline reviews where you want to test
+comparison/reporting behavior without depending on current network or provider
+responses.
+
 ## Enabling Live Lookup
 
 From the command line:

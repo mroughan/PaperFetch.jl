@@ -6,6 +6,8 @@
 - Added a documentation page explaining Markdown report flags, field comparison
   flags, entry-type-specific required fields, normalization behavior, and fetch
   manifests.
+- Clarified early in the README and docs that a fixture is local JSON source
+  metadata used for deterministic examples, tests, and offline review.
 - Reworked Markdown reports to reduce redundant checklist text. Each entry now
   has a compact general-flags table for source discovery, provider errors,
   required fields, comparison availability, PDF candidates, and confidence.

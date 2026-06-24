@@ -77,6 +77,10 @@ julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
   --outdir paperfetch_out
 ```
 
+A fixture is a small JSON file containing known source metadata for examples or
+tests. It lets PaperFetch.jl exercise the same comparison and reporting logic
+without making live API requests, so results are deterministic and repeatable.
+
 This writes:
 
 - `paperfetch_out/01_exact_article.md`
