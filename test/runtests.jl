@@ -275,6 +275,11 @@ end
     @test editor_cmp.status in (:exact, :equivalent)
     @test PaperFetch.field_importance(entry, "editor") == :important
     @test PaperFetch.comparison_severity(entry, editor_cmp) == :green
+
+    editor_query = PaperFetch.title_author_query(entry)
+    @test occursin("edited book", editor_query)
+    @test occursin("example", editor_query)
+    @test occursin("sample", editor_query)
 end
 
 @testset "documented API report examples" begin
@@ -405,6 +410,14 @@ end
             return JSON3.read("""{"results":[]}""")
         elseif occursin("api.figshare.com/v2/articles/search", url)
             return JSON3.read("""[]""")
+        elseif occursin("openlibrary.org/isbn/9780000000001", url)
+            return JSON3.read("""
+            {
+              "title":"Fallback Book",
+              "publish_date":"2020",
+              "publishers":["ISBN Library Press"]
+            }
+            """)
         elseif occursin("openlibrary.org/search.json", url)
             return JSON3.read("""
             {"docs":[{
@@ -416,6 +429,17 @@ end
               "isbn":["9780000000001"]
             }]}
             """)
+        elseif occursin("www.googleapis.com/books", url) && occursin("isbn%3A9780000000001", url)
+            return JSON3.read("""
+            {"items":[{"id":"gb-isbn","volumeInfo":{
+              "title":"Fallback Book",
+              "authors":["Bert Book"],
+              "publishedDate":"2020",
+              "publisher":"Google ISBN Press",
+              "infoLink":"https://books.example/isbn",
+              "industryIdentifiers":[{"type":"ISBN_13","identifier":"9780000000001"}]
+            }}]}
+            """)
         elseif occursin("www.googleapis.com/books", url)
             return JSON3.read("""
             {"items":[{"id":"gb1","volumeInfo":{
@@ -423,7 +447,8 @@ end
               "authors":["Bert Book"],
               "publishedDate":"2020",
               "publisher":"Google Press",
-              "infoLink":"https://books.example/fallback"
+              "infoLink":"https://books.example/fallback",
+              "industryIdentifiers":[{"type":"ISBN_13","identifier":"9780000000002"}]
             }}]}
             """)
         else
@@ -455,6 +480,12 @@ end
         source.publisher == "Library Press", book_sources)
     @test any(source -> source.provider == "google-books" &&
         source.publisher == "Google Press", book_sources)
+    @test any(source -> source.provider == "openlibrary" &&
+        source.publisher == "ISBN Library Press", book_sources)
+    @test any(source -> source.provider == "google-books" &&
+        source.publisher == "Google ISBN Press", book_sources)
+    @test any(url -> occursin("openlibrary.org/isbn/9780000000001", url), calls)
+    @test any(url -> occursin("isbn%3A9780000000001", url), calls)
 end
 
 @testset "incorrect DOI is detected and the correct paper is found by title search" begin
@@ -854,7 +885,8 @@ end
               "authors":["Gary Google"],
               "publishedDate":"2002-01-01",
               "publisher":"Google Books Press",
-              "infoLink":"https://books.example/google"
+              "infoLink":"https://books.example/google",
+              "industryIdentifiers":[{"type":"ISBN_13","identifier":"9781111111111"}]
             }}]}
             """)
         else
@@ -876,6 +908,7 @@ end
 
     google_sources = PaperFetch.google_books_records(provider, "Google Book")
     @test google_sources[1].publisher == "Google Books Press"
+    @test google_sources[1].raw["isbn"] == ["9781111111111"]
 end
 
 @testset "comparison statuses from examples" begin

@@ -49,6 +49,9 @@
   OpenAlex, and arXiv.
 - Added book lookup paths through Open Library and Google Books, including ISBN
   lookup where an ISBN is present.
+- Improved book lookup when the input has no ISBN: title/creator search results
+  from Open Library or Google Books can now supply discovered ISBNs, which are
+  then used for ISBN-specific metadata lookups.
 - Added URL metadata inspection for `url`, `note`, and `howpublished` links,
   including direct PDF URL detection and citation meta-tag extraction.
 - Added Semantic Scholar API adapter for DOI lookup and title/author fallback
@@ -59,7 +62,12 @@
   candidate discovery when returned by CORE.
 - Added Figshare API adapter for DOI and title/author search, including
   article-detail lookup for downloadable PDF files.
-- Added `TO_CONSIDER.md` to track optional future APIs and why they might help.
+- Added `TO_CONSIDER.md` to track optional future APIs, structured
+  landing-page sources, and why they might help.
+- Added notes to `TO_CONSIDER.md` for conference landing pages with embedded
+  BibTeX, such as CVF open-access proceedings pages, and for JSTOR as a
+  landing-page/text-analysis support consideration rather than a current public
+  metadata API provider.
 
 ### Caching
 - Added `cache_dir` parameter to `ApiProvider` and `check_bibliography`;

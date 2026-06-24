@@ -46,6 +46,8 @@ Provider selection order:
 3. An `ApiProvider` is added when `use_apis=true`. It can query Crossref,
    OpenAlex, Unpaywall, DataCite, arXiv, Semantic Scholar, PubMed, CORE,
    Figshare, Open Library, Google Books, and URL landing pages as appropriate.
+   For books without an ISBN, title/creator search results can supply an ISBN
+   that is then used for ISBN-specific Open Library and Google Books lookups.
 4. If still empty, a `CandidateProvider` is used as a read-only fallback that
    only echoes each entry's own title/doi/url back as its "source". This
    cannot detect an incorrect doi, title, or author. A `@warn` is emitted when

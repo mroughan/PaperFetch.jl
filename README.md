@@ -26,6 +26,8 @@ or separate AI-assisted editing task can improve the bibliography deliberately.
 - Looks up metadata from deterministic fixtures or optional online providers:
   Crossref, OpenAlex, Unpaywall, DataCite, arXiv, Semantic Scholar, PubMed,
   CORE, Figshare, Open Library, Google Books, and URL landing-page metadata.
+  Book lookups can search by title and creator to discover an ISBN, then retry
+  ISBN-specific metadata paths when the input BibTeX has no ISBN.
 - Compares bibliography fields with cautious normalization for title case,
   page ranges, Unicode/LaTeX accents, DOI URL variants, author initials, and
   similar harmless differences. URL paths and queries keep their case, and

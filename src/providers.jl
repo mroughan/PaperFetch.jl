@@ -311,7 +311,34 @@ function sources_for(provider::ApiProvider, entry::BibEntry)
             key in seen || (push!(seen, key); push!(sources, rec))
         end
     end
+    if entry.type in ("book", "inbook", "booklet", "manual", "proceedings") &&
+            !any(id -> id.kind == :isbn, ids)
+        for isbn in discovered_isbns(sources)
+            for rec in openlibrary_isbn_records(provider, isbn)
+                key = rec.provider * ":" * isbn
+                key in seen || (push!(seen, key); push!(sources, rec))
+            end
+            for rec in google_books_records(provider, "isbn:" * isbn)
+                key = rec.provider * ":" * isbn
+                key in seen || (push!(seen, key); push!(sources, rec))
+            end
+        end
+    end
     return sources
+end
+
+function discovered_isbns(sources::Vector{SourceRecord})
+    isbns = String[]
+    for source in sources
+        raw_isbn = get(source.raw, "isbn", nothing)
+        raw_isbn === nothing && continue
+        values = raw_isbn isa AbstractVector ? raw_isbn : [raw_isbn]
+        for value in values
+            clean = replace(String(value), r"[^0-9Xx]" => "")
+            isempty(clean) || clean in isbns || push!(isbns, clean)
+        end
+    end
+    return isbns
 end
 
 """
@@ -531,7 +558,8 @@ function title_author_query(entry::BibEntry)
     title === nothing && return nothing
     clean_title = normalize_text(title)
     isempty(clean_title) && return nothing
-    surnames = author_surnames(get(entry.fields, "author", ""))
+    creator = get(entry.fields, "author", get(entry.fields, "editor", ""))
+    surnames = author_surnames(creator)
     query = isempty(surnames) ? clean_title : clean_title * " " * join(surnames, " ")
     return strip(query)
 end
@@ -1007,9 +1035,19 @@ function google_books_records(provider::ApiProvider, query::AbstractString)
             authors = hasproperty(info, :authors) ? String.(info.authors) : String[]
             publisher = optional_string(info, :publisher)
             year = optional_string(info, :publishedDate)
+            isbns = String[]
+            if hasproperty(info, :industryIdentifiers)
+                for identifier in info.industryIdentifiers
+                    value = optional_string(identifier, :identifier)
+                    value === nothing && continue
+                    clean = replace(value, r"[^0-9Xx]" => "")
+                    isempty(clean) || clean in isbns || push!(isbns, clean)
+                end
+            end
             push!(records, SourceRecord(provider="google-books", id=String(get(item, :id, "")),
                 title=optional_string(info, :title), authors=authors, year=year,
-                publisher=publisher, url=optional_string(info, :infoLink)))
+                publisher=publisher, url=optional_string(info, :infoLink),
+                raw=Dict{String,Any}("isbn" => isbns)))
         end
         return records
     catch err

@@ -44,6 +44,21 @@ High-value for computer science publications, especially conference papers,
 proceedings, edited volumes, and author disambiguation. Its coverage is narrower
 than OpenAlex or Semantic Scholar, but often cleaner for CS venues.
 
+## Conference Landing Pages With Embedded BibTeX
+
+Some conference proceedings sites publish stable paper landing pages that include
+BibTeX entries and direct PDF links. The CVF open-access pages for CVPR, ICCV,
+and ECCV workshops are a good example:
+`https://openaccess.thecvf.com/content_iccv_2015/html/He_Delving_Deep_into_ICCV_2015_paper.html`.
+These pages could be useful when a BibTeX entry has a URL but no DOI, or when
+generic title search finds weak metadata for a conference paper.
+
+This should be implemented as a narrow landing-page metadata adapter rather than
+general web scraping: only use it for known proceedings hosts, parse embedded
+BibTeX or citation metadata when present, record the page URL as provenance, and
+respect rate limits. It is especially relevant for open-access computer vision
+proceedings that expose clean HTML, PDF, and BibTeX links.
+
 ## HAL
 
 Useful for French and European open-access papers, preprints, reports, and
@@ -79,6 +94,19 @@ optional adapter for institutions that already have access.
 Broad scholarly and patent metadata. It could be useful for patents, standards,
 and scholarly works that do not resolve cleanly through open scholarly APIs.
 Check API access terms before integrating.
+
+## JSTOR
+
+Potentially useful for older journal articles, humanities and social-science
+references, books, and primary-source material. At present this is not a normal
+public bibliographic metadata API candidate like Crossref or OpenAlex. JSTOR's
+former Constellate/Data for Research path was sunset on July 1, 2025, and JSTOR
+now points text-analysis users to a support/access workflow.
+
+For PaperFetch, the near-term approach should be to use DOI-backed metadata
+providers first, then inspect JSTOR landing-page metadata when the BibTeX entry
+already contains a JSTOR URL. Do not implement a JSTOR provider until there is a
+documented, stable API with acceptable terms for this validation use case.
 
 ## ORCID
 
