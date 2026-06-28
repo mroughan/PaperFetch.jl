@@ -73,6 +73,8 @@
   BibTeX, such as CVF open-access proceedings pages, and for JSTOR as a
   landing-page/text-analysis support consideration rather than a current public
   metadata API provider.
+- Added patent metadata APIs to `TO_CONSIDER.md`, including The Lens,
+  PatentsView, USPTO Open Data, EPO OPS, and WIPO PATENTSCOPE.
 
 ### Caching
 - Added `cache_dir` parameter to `ApiProvider` and `check_bibliography`;

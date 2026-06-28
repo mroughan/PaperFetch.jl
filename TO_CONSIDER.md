@@ -95,6 +95,35 @@ Broad scholarly and patent metadata. It could be useful for patents, standards,
 and scholarly works that do not resolve cleanly through open scholarly APIs.
 Check API access terms before integrating.
 
+## Patent Metadata APIs
+
+Patent references are not well covered by article-oriented providers. A future
+patent adapter should recognize patent numbers in fields such as `number`,
+`note`, `url`, and `howpublished`, normalize jurisdiction-specific identifiers
+such as `US`, `EP`, and `WO`, and compare title, inventor, assignee, publication
+date, grant date, jurisdiction, and landing-page URL.
+
+Candidate APIs:
+
+- **The Lens API**: broad patent and scholarly metadata, useful when references
+  cross between papers, patents, and standards. Requires API credentials and
+  term checks.
+- **PatentsView API**: useful for US patents and analysis-friendly search by
+  patent number, inventor, assignee, title, date, and classification.
+- **USPTO Open Data / APIs**: official US patent data source. Good provenance,
+  but the API and bulk-data products should be evaluated for the small
+  bibliography workflow.
+- **EPO Open Patent Services (OPS)**: useful for European and international
+  patent bibliographic data, family data, and legal-status context. Requires
+  authentication and careful fair-use handling.
+- **WIPO PATENTSCOPE data/services**: useful for PCT and international patent
+  applications. Access model and data-service terms should be checked before
+  integration.
+
+Do not use Google Patents as a default adapter unless a stable, documented API
+with acceptable terms becomes available. It may remain useful as a manual
+landing-page URL supplied by the bibliography.
+
 ## JSTOR
 
 Potentially useful for older journal articles, humanities and social-science
