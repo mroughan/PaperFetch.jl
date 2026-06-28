@@ -48,6 +48,8 @@ Provider selection order:
    Figshare, Open Library, Google Books, and URL landing pages as appropriate.
    For books without an ISBN, title/creator search results can supply an ISBN
    that is then used for ISBN-specific Open Library and Google Books lookups.
+   GitHub repository URLs can use `CITATION.cff` as structured software
+   citation metadata when such a file is available.
 4. If still empty, a `CandidateProvider` is used as a read-only fallback that
    only echoes each entry's own title/doi/url back as its "source". This
    cannot detect an incorrect doi, title, or author. A `@warn` is emitted when

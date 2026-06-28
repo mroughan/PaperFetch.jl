@@ -28,6 +28,7 @@ or separate AI-assisted editing task can improve the bibliography deliberately.
   CORE, Figshare, Open Library, Google Books, and URL landing-page metadata.
   Book lookups can search by title and creator to discover an ISBN, then retry
   ISBN-specific metadata paths when the input BibTeX has no ISBN.
+  Software repository URLs can use `CITATION.cff` metadata when available.
 - Compares bibliography fields with cautious normalization for title case,
   page ranges, Unicode/LaTeX accents, DOI URL variants, author initials, and
   similar harmless differences. URL paths and queries keep their case, and
@@ -52,15 +53,22 @@ or separate AI-assisted editing task can improve the bibliography deliberately.
 
 ## Installation
 
-PaperFetch.jl currently targets Julia 1.11 or newer. Until the package is
-registered, install it from the repository:
+PaperFetch.jl currently targets Julia 1.11 or newer. Install the registered
+package with Julia's package manager:
+
+```julia
+using Pkg
+Pkg.add("PaperFetch")
+```
+
+To use the latest development version directly from GitHub:
 
 ```julia
 using Pkg
 Pkg.add(url="https://github.com/mroughan/PaperFetch.jl")
 ```
 
-For development from a local checkout:
+For package development from a local checkout:
 
 ```bash
 git clone https://github.com/mroughan/PaperFetch.jl.git

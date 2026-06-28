@@ -6,6 +6,8 @@
 - Added a documentation page explaining Markdown report flags, field comparison
   flags, entry-type-specific required fields, normalization behavior, and fetch
   manifests.
+- Updated README installation instructions now that PaperFetch.jl is registered
+  and installable with `Pkg.add("PaperFetch")`.
 - Clarified early in the README and docs that a fixture is local JSON source
   metadata used for deterministic examples, tests, and offline review.
 - Reworked Markdown reports to reduce redundant checklist text. Each entry now
@@ -54,6 +56,9 @@
   then used for ISBN-specific metadata lookups.
 - Added URL metadata inspection for `url`, `note`, and `howpublished` links,
   including direct PDF URL detection and citation meta-tag extraction.
+- Added GitHub repository `CITATION.cff` discovery for URL-backed software
+  references, using title, authors, DOI, release year, and URL metadata when
+  present.
 - Added Semantic Scholar API adapter for DOI lookup and title/author fallback
   search.
 - Added PubMed / NCBI E-utilities adapter for DOI, PMID, and title/author

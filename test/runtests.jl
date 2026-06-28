@@ -752,6 +752,24 @@ end
 
 @testset "URL metadata and direct PDF lookup" begin
     function fake_text(url; headers=Pair{String,String}[])
+        if occursin("raw.githubusercontent.com/example/project/main/CITATION.cff", url)
+            return """
+            cff-version: 1.2.0
+            title: "Useful Research Software"
+            doi: 10.5281/zenodo.12345
+            date-released: 2024-03-01
+            url: https://github.com/example/project
+            authors:
+              - family-names: Example
+                given-names: Erin
+              - family-names: Sample
+                given-names: Sam
+            """
+        elseif occursin("raw.githubusercontent.com/example/project/master/CITATION.cff", url)
+            error("main branch citation should be used first")
+        elseif occursin("raw.githubusercontent.com/example/nocff", url)
+            error("missing citation")
+        end
         if endswith(url, ".pdf")
             return "%PDF-1.7\nfixture"
         end
@@ -783,6 +801,19 @@ end
     pdf_sources = PaperFetch.sources_for(provider, pdf_entry)
     @test any(source -> source.provider == "url-pdf" &&
         source.pdf_url == "https://example.org/direct.pdf", pdf_sources)
+
+    repo_entry = BibEntry("software", "misc", Dict(
+        "title" => "Useful Research Software",
+        "url" => "https://github.com/example/project",
+    ))
+    repo_sources = PaperFetch.sources_for(provider, repo_entry)
+    cff_source = only(filter(source -> source.provider == "citation-cff", repo_sources))
+    @test cff_source.title == "Useful Research Software"
+    @test cff_source.doi == "10.5281/zenodo.12345"
+    @test cff_source.year == "2024"
+    @test cff_source.authors == ["Erin Example", "Sam Sample"]
+    @test cff_source.raw["citation_url"] ==
+        "https://raw.githubusercontent.com/example/project/main/CITATION.cff"
 end
 
 @testset "provider URL construction and errors" begin

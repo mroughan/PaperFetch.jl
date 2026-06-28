@@ -58,6 +58,9 @@ see:
 - URL-backed entries can check the URL and read common citation metadata from
   the landing page. URLs can be taken from `url`, `note`, or `howpublished`,
   including LaTeX `\url{...}` macros.
+- GitHub repository URLs can use `CITATION.cff` files when present. This is
+  treated as structured author-provided citation metadata for software, not as
+  a general repository scrape.
 
 Provider results are candidates, not automatic truth. The report records
 agreement, conflicts, missing fields, and provider errors so a person can decide

@@ -1074,6 +1074,90 @@ function html_meta(content::AbstractString, names::Vector{String})
     return nothing
 end
 
+function github_citation_cff_urls(url::AbstractString)
+    m = match(r"^https?://github\.com/([^/\s]+)/([^/\s#?]+)"i, String(url))
+    m === nothing && return String[]
+    owner, repo = m.captures[1], replace(m.captures[2], r"\.git$" => "")
+    (owner === nothing || repo === nothing) && return String[]
+    return [
+        "https://raw.githubusercontent.com/$(owner)/$(repo)/main/CITATION.cff",
+        "https://raw.githubusercontent.com/$(owner)/$(repo)/master/CITATION.cff",
+    ]
+end
+
+function cff_scalar(content::AbstractString, field::AbstractString)
+    rx = Regex("(?m)^\\s*" * field * "\\s*:\\s*(.+?)\\s*\$")
+    m = match(rx, content)
+    m === nothing && return nothing
+    value = strip(something(m.captures[1], ""))
+    value = replace(value, r"^['\"]|['\"]$" => "")
+    return isempty(value) ? nothing : value
+end
+
+function cff_authors(content::AbstractString)
+    authors = String[]
+    current = Dict{String,String}()
+    in_authors = false
+    for line in split(content, '\n')
+        stripped = strip(line)
+        if occursin(r"^authors\s*:\s*$", stripped)
+            in_authors = true
+            continue
+        end
+        in_authors || continue
+        isempty(stripped) && continue
+        if startswith(stripped, "-")
+            if !isempty(current)
+                given = get(current, "given-names", "")
+                family = get(current, "family-names", "")
+                name = strip(join(filter(!isempty, [given, family]), " "))
+                isempty(name) || push!(authors, name)
+            end
+            current = Dict{String,String}()
+        end
+        m = match(r"^-?\s*([A-Za-z-]+)\s*:\s*(.+?)\s*$", stripped)
+        m === nothing && continue
+        key = something(m.captures[1], "")
+        value = replace(strip(something(m.captures[2], "")), r"^['\"]|['\"]$" => "")
+        if !(key in ("given-names", "family-names", "name"))
+            !isempty(current) && break
+            continue
+        end
+        current[key] = value
+    end
+    if !isempty(current)
+        given = get(current, "given-names", "")
+        family = get(current, "family-names", get(current, "name", ""))
+        name = strip(join(filter(!isempty, [given, family]), " "))
+        isempty(name) || push!(authors, name)
+    end
+    return authors
+end
+
+function cff_record(provider::ApiProvider, repo_url::AbstractString)
+    for cff_url in github_citation_cff_urls(repo_url)
+        content = try
+            provider_get_text(provider, cff_url; headers=["User-Agent" => provider.user_agent])
+        catch
+            continue
+        end
+        title = cff_scalar(content, "title")
+        doi = cff_scalar(content, "doi")
+        released = cff_scalar(content, "date-released")
+        cff_url_field = cff_scalar(content, "url")
+        authors = cff_authors(content)
+        if title !== nothing || doi !== nothing || !isempty(authors)
+            year = released === nothing ? nothing : normalize_year(released)
+            return SourceRecord(provider="citation-cff", id=String(cff_url),
+                title=title, authors=authors, year=year,
+                doi=doi === nothing ? nothing : normalize_doi(doi),
+                url=something(cff_url_field, String(repo_url)),
+                raw=Dict{String,Any}("citation_url" => cff_url))
+        end
+    end
+    return nothing
+end
+
 function url_records(provider::ApiProvider, url::AbstractString, entry::BibEntry)
     try
         body = provider_get_text(provider, String(url); headers=["User-Agent" => provider.user_agent])
@@ -1081,6 +1165,8 @@ function url_records(provider::ApiProvider, url::AbstractString, entry::BibEntry
             return [SourceRecord(provider="url-pdf", id=String(url), title=get(entry.fields, "title", nothing),
                 url=String(url), pdf_url=String(url), raw=Dict{String,Any}("content" => "pdf"))]
         end
+        cff = cff_record(provider, url)
+        cff === nothing || return [cff]
         title = html_meta(body, ["citation_title", "dc.title", "DC.title", "og:title"])
         doi = html_meta(body, ["citation_doi", "dc.identifier", "DC.identifier"])
         pdf = html_meta(body, ["citation_pdf_url"])
