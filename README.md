@@ -37,6 +37,11 @@ or separate AI-assisted editing task can improve the bibliography deliberately.
   `booktitle`, and edited books can use `editor` instead of `author`.
 - Matches URLs found in `url`, `note`, or `howpublished`, including LaTeX
   `\url{...}` forms, when checking URL-backed references.
+- Resolves competing source candidates conservatively. A provider result must
+  have enough identity evidence, such as matching DOI, title and creator, title
+  and year, or URL, before PaperFetch uses it as the source of truth. When a
+  journal article and an arXiv preprint both plausibly match the same entry and
+  the BibTeX does not distinguish them, the journal article is preferred.
 - Writes Markdown and INC reports; INC is a spreadsheet-friendly CSV-like format
   handled by IncCSV.jl.
 - Optionally downloads PDFs from explicit PDF candidate URLs and writes fetch
@@ -107,6 +112,8 @@ Each Markdown entry keeps the original BibTeX key, then shows general flags for
 source discovery, provider errors, required fields, PDF candidates, and
 confidence. Field-by-field comparisons include a `Flag` column so green, amber,
 red, and ignored review signals are visible next to the relevant value.
+Entry notes include the selected source, the source-resolution confidence, and
+the identity evidence used to choose it.
 
 ## Live API Checks
 

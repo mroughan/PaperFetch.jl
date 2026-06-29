@@ -280,6 +280,118 @@ function comparison_score(comparisons)
     return round(total / length(comparisons); digits=3)
 end
 
+const SOURCE_RESOLUTION_WEIGHTS = Dict(
+    "doi"       => 4.0,
+    "title"     => 3.0,
+    "author"    => 3.0,
+    "editor"    => 3.0,
+    "year"      => 1.5,
+    "journal"   => 1.0,
+    "booktitle" => 1.0,
+    "url"       => 1.0,
+    "pages"     => 0.5,
+    "publisher" => 0.5,
+)
+
+const SOURCE_RESOLUTION_MINIMUM = 0.58
+
+function status_resolution_value(status::Symbol)
+    status == :exact && return 1.0
+    status == :normalized && return 0.95
+    status == :equivalent && return 0.8
+    status == :ambiguous && return 0.45
+    status == :missing_input && return 0.1
+    status == :missing_source && return 0.05
+    return 0.0
+end
+
+function source_resolution_score(comparisons::Vector{FieldComparison})
+    isempty(comparisons) && return 0.0
+    total = 0.0
+    weight_total = 0.0
+    for cmp in comparisons
+        cmp.status in (:missing_input, :missing_source) && continue
+        cmp.field == "doi" && cmp.status == :conflict && continue
+        weight = get(SOURCE_RESOLUTION_WEIGHTS, cmp.field, 0.5)
+        total += weight * status_resolution_value(cmp.status)
+        weight_total += weight
+    end
+    weight_total == 0 && return 0.0
+    return round(total / weight_total; digits=3)
+end
+
+function comparison_by_field(comparisons::Vector{FieldComparison}, field::AbstractString)
+    found = filter(cmp -> cmp.field == field, comparisons)
+    return isempty(found) ? nothing : first(found)
+end
+
+positive_identity_status(status::Symbol) = status in (:exact, :normalized, :equivalent)
+reviewable_identity_status(status::Symbol) = status in (:exact, :normalized, :equivalent, :ambiguous)
+
+function field_has_status(comparisons::Vector{FieldComparison}, fields, predicate)
+    for field in fields
+        cmp = comparison_by_field(comparisons, field)
+        cmp === nothing && continue
+        predicate(cmp.status) && return true
+    end
+    return false
+end
+
+function field_conflicts(comparisons::Vector{FieldComparison}, fields)
+    return field_has_status(comparisons, fields, ==(:conflict))
+end
+
+function source_identity_evidence(comparisons::Vector{FieldComparison})
+    doi_ok = field_has_status(comparisons, ("doi",), ==(:exact))
+    title_ok = field_has_status(comparisons, ("title",), positive_identity_status)
+    title_reviewable = field_has_status(comparisons, ("title",), reviewable_identity_status)
+    creator_ok = field_has_status(comparisons, ("author", "editor"), reviewable_identity_status)
+    year_ok = field_has_status(comparisons, ("year",), positive_identity_status)
+    container_ok = field_has_status(comparisons, ("journal", "booktitle"), positive_identity_status)
+    url_ok = field_has_status(comparisons, ("url",), positive_identity_status)
+
+    title_conflict = field_conflicts(comparisons, ("title",))
+    creator_conflict = field_conflicts(comparisons, ("author", "editor"))
+    year_conflict = field_conflicts(comparisons, ("year",))
+
+    evidence = String[]
+    doi_ok && !title_conflict && push!(evidence, "matching DOI")
+    title_ok && creator_ok && push!(evidence, "matching title and creator")
+    title_reviewable && creator_ok && year_ok &&
+        push!(evidence, "close title with matching creator and year")
+    title_ok && year_ok && push!(evidence, "matching title and year")
+    title_ok && container_ok && !year_conflict && push!(evidence, "matching title and container")
+    title_ok && url_ok && !creator_conflict && push!(evidence, "matching title and URL")
+    url_ok && !title_conflict && !creator_conflict && push!(evidence, "matching URL")
+    return evidence
+end
+
+function arxiv_source(source::SourceRecord)
+    occursin("arxiv", lowercase(source.provider)) && return true
+    source.url !== nothing && occursin("arxiv.org", lowercase(source.url)) && return true
+    source.pdf_url !== nothing && occursin("arxiv.org", lowercase(source.pdf_url)) && return true
+    return false
+end
+
+function journal_article_source(source::SourceRecord)
+    arxiv_source(source) && return false
+    source.journal !== nothing && return true
+    source.doi !== nothing && source.provider in (
+        "crossref", "crossref-search", "openalex", "openalex-search",
+        "semantic-scholar", "semantic-scholar-search", "pubmed", "core",
+    ) && return true
+    return false
+end
+
+function source_preference_score(source::SourceRecord)
+    score = 0.0
+    journal_article_source(source) && (score += 0.30)
+    source.doi !== nothing && (score += 0.10)
+    occursin("-search", source.provider) && (score -= 0.03)
+    arxiv_source(source) && (score -= 0.20)
+    return score
+end
+
 function default_comparison_fields(entry::BibEntry)
     t = lowercase(entry.type)
     container_field = t in ("inproceedings", "conference", "incollection", "inbook") ?
@@ -305,6 +417,19 @@ Compare one `BibEntry` with candidate source records and return an `EntryReport`
 By default, proceedings and chapter-style entries compare their container as
 `booktitle`; articles compare `journal`. Books and chapter-style entries with
 an `editor` but no `author` compare `editor` as the creator field.
+
+Source records are treated as candidates, not automatic truth. Candidate
+resolution first rejects hard title, creator, or year mismatches, then requires
+enough identity evidence such as a matching DOI, matching title and creator, or
+matching title and year. A close-but-not-identical title can still be accepted
+when creator and year evidence are strong, with the title comparison marked for
+manual review. Extra source fields that are absent from the BibTeX entry remain
+visible as missing-input comparisons, but they do not by themselves make the
+source less likely to be the same work.
+
+When journal-article metadata and arXiv preprint metadata both match the same
+entry with equal source-resolution confidence, the journal article is preferred
+and the report records that choice in its notes.
 
 The comparison is tolerant for bibliographic formatting, but conflicts are still
 reported explicitly. DOI values must match after DOI normalization. Author and
@@ -361,12 +486,20 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
             input_value === nothing && source_value === nothing && continue
             push!(comparisons, compare_value(field, input_value, source_value))
         end
-        score = comparison_score(comparisons)
+        score = source_resolution_score(comparisons)
+        evidence = source_identity_evidence(comparisons)
+        enough_evidence = !isempty(evidence)
+        self_source = source.provider == "input"
         push!(candidates, (
             source=source,
             comparisons=comparisons,
             score=score,
-            reliable=!source_hard_mismatch(entry, source, comparisons),
+            evidence=evidence,
+            preference=source_preference_score(source),
+            reliable=!self_source &&
+                !source_hard_mismatch(entry, source, comparisons) &&
+                enough_evidence &&
+                score >= SOURCE_RESOLUTION_MINIMUM,
         ))
     end
 
@@ -378,9 +511,12 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
         reasons = [cmp.field for cmp in candidate.comparisons
             if cmp.field in ("title", "author", "editor") && cmp.status == :conflict]
         year_hard_mismatch(entry, candidate.source) && push!(reasons, "year")
+        isempty(candidate.evidence) && push!(reasons, "insufficient identity evidence")
+        candidate.score < SOURCE_RESOLUTION_MINIMUM &&
+            push!(reasons, "confidence below $(SOURCE_RESOLUTION_MINIMUM)")
         isempty(reasons) || push!(discarded_notes,
             "discarded $(candidate.source.provider) ($(source_identity(candidate.source))): " *
-            "hard mismatch in $(join(unique(reasons), ", "))")
+            "$(join(unique(reasons), ", "))")
     end
 
     if isempty(reliable_candidates)
@@ -393,13 +529,24 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
         return EntryReport(entry, sources, FieldComparison[], 0.0, notes, String[])
     end
 
-    best = first(sort!(collect(reliable_candidates), by=candidate -> candidate.score, rev=true))
+    ranked = sort!(collect(reliable_candidates),
+        by=candidate -> (candidate.score, candidate.preference), rev=true)
+    best = first(ranked)
     best_source      = best.source
     best_comparisons = best.comparisons
     best_score       = best.score
 
     notes = String["best source: $(best_source.provider) ($(source_identity(best_source)))"]
+    push!(notes, "source resolution confidence $(best_score); evidence: $(join(best.evidence, "; "))")
     self_comparison_only && push!(notes, self_comparison_note)
+    if journal_article_source(best_source) &&
+            any(candidate -> candidate.source !== best_source &&
+                candidate.reliable &&
+                arxiv_source(candidate.source) &&
+                candidate.score == best_score,
+                ranked)
+        push!(notes, "preferred journal-article metadata over a matching arXiv preprint because both appeared to describe the same work")
+    end
     entry_doi = nonempty(get(entry.fields, "doi", nothing))
     if entry_doi !== nothing
         entry_doi_norm = normalize_doi(entry_doi)

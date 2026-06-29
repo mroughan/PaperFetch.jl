@@ -24,6 +24,13 @@
   `author`.
 
 ### Validation transparency
+- Added a conservative source-resolution layer before field comparison. Source
+  records are now scored as candidates using identity evidence such as DOI,
+  title/creator, title/year, title/container, and URL matches. Weak title-only
+  hits and low-confidence candidates are discarded with explanatory notes
+  instead of being treated as source metadata. When a journal article and arXiv
+  preprint both match with equal confidence, the journal article is preferred
+  and the report records that choice.
 - Added progress reporting for check and fetch workflows. The CLI reports
   entry-by-entry progress to `stderr` by default, `--quiet` suppresses it, and
   the Julia API exposes an optional `progress_io` stream for callers that want

@@ -771,6 +771,32 @@ end
     discarded = only(filter(n -> occursin("fixture-wrong-author", n), near_year_report.notes))
     @test occursin("author", discarded)
     @test !occursin("year", discarded)
+
+    weak_title_only = SourceRecord(provider="weak-search",
+        title="Surreal Numbers with Derivation, Hardy Fields and Transseries: A Survey")
+    weak_report = compare_entry(entry, [weak_title_only])
+    @test weak_report.confidence == 0.0
+    @test any(note -> occursin("insufficient identity evidence", note), weak_report.notes)
+
+    preprint = SourceRecord(provider="arxiv-search",
+        title="Preprints and Journal Versions",
+        authors=["Ada Example", "Ben Reference"],
+        year="2024",
+        url="https://arxiv.org/abs/2401.00001")
+    journal = SourceRecord(provider="crossref-search",
+        title="Preprints and Journal Versions",
+        authors=["Ada Example", "Ben Reference"],
+        year="2024",
+        doi="10.5555/journal-version",
+        journal="Journal of Versioned Literature")
+    version_entry = BibEntry("version_choice", "article", Dict(
+        "title" => "Preprints and Journal Versions",
+        "author" => "Example, Ada and Reference, Ben",
+        "year" => "2024",
+    ))
+    version_report = compare_entry(version_entry, [preprint, journal])
+    @test occursin("crossref-search", version_report.notes[1])
+    @test any(note -> occursin("preferred journal-article metadata", note), version_report.notes)
 end
 
 @testset "URL metadata and direct PDF lookup" begin

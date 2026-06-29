@@ -66,6 +66,15 @@ Provider results are candidates, not automatic truth. The report records
 agreement, conflicts, missing fields, and provider errors so a person can decide
 what should be fixed in the original BibTeX.
 
+Candidate selection is done after all providers return. PaperFetch.jl scores the
+identity evidence for each candidate and requires enough support before using a
+record as the comparison source. Good evidence includes a matching DOI, matching
+title and creator, matching title and year, matching title and container, or a
+matching URL. A title-only result is normally not enough. If a journal article
+and an arXiv preprint both match the same entry with equal confidence, the
+journal article is preferred because most reference lists intend to cite the
+published version unless the BibTeX explicitly points at the preprint.
+
 Book-like entries are handled with their expected fields. Proceedings and
 chapter entries compare `booktitle` rather than `journal`; edited books can
 compare `editor` as the creator when no `author` field is present. A large year

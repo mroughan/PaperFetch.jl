@@ -47,6 +47,28 @@ Field-level details are shown in a separate comparison table. The `Flag` column
 summarizes each field as green, amber, red, or ignored. This avoids repeating a
 full checklist while keeping the signal close to the field value being reviewed.
 
+## Source Resolution
+
+Provider records are treated as candidates until they pass PaperFetch.jl's
+source-resolution step. This step is deliberately conservative:
+
+- hard title, creator, or year mismatches are rejected;
+- a candidate must have identity evidence, such as matching DOI, matching title
+  and creator, matching title and year, matching title and container, or a
+  matching URL;
+- a close-but-not-identical title can be accepted when creator and year evidence
+  are strong, but the title remains marked for manual review;
+- the source-resolution confidence must pass a minimum threshold;
+- fields present in the source but absent from the BibTeX entry are still
+  reported as missing input, but they do not by themselves make the candidate a
+  worse identity match.
+
+This means a title-only search hit may be shown as discarded rather than used as
+the source of truth. When two candidates are equally plausible and one is a
+journal article while the other is an arXiv preprint of the same work,
+PaperFetch.jl prefers the journal article and records that decision in the entry
+notes.
+
 ## Required And Supplementary Fields
 
 Required fields depend on the BibTeX entry type. For example:
