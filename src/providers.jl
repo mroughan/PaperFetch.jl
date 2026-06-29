@@ -1094,10 +1094,39 @@ function cff_scalar(content::AbstractString, field::AbstractString)
     return isempty(value) ? nothing : value
 end
 
-function cff_authors(content::AbstractString)
-    authors = String[]
+"""
+    cff_author_entries(content)
+
+Parse the `authors:` list of a CITATION.cff file into `(name, orcid)` pairs.
+
+The end of the authors section is detected by indentation (an unindented line
+starts a new top-level CFF key), not by field name. This means author fields
+that aren't part of the name (such as `orcid` or `affiliation`) are skipped
+without prematurely truncating the author list — a YAML list item is only
+required to provide `given-names`/`family-names` or `name`.
+
+# Example
+
+```julia
+content = "authors:\\n  - family-names: Doe\\n    given-names: Jane\\n"
+PaperFetch.cff_author_entries(content)[1].name == "Jane Doe"
+```
+"""
+function cff_author_entries(content::AbstractString)
+    entries = NamedTuple{(:name, :orcid), Tuple{String,Union{Nothing,String}}}[]
     current = Dict{String,String}()
     in_authors = false
+    function flush_author!()
+        isempty(current) && return nothing
+        given = get(current, "given-names", "")
+        family = get(current, "family-names", get(current, "name", ""))
+        name = strip(join(filter(!isempty, [given, family]), " "))
+        if !isempty(name)
+            orcid = get(current, "orcid", nothing)
+            push!(entries, (name=name, orcid=(orcid === nothing || isempty(orcid)) ? nothing : orcid))
+        end
+        return nothing
+    end
     for line in split(content, '\n')
         stripped = strip(line)
         if occursin(r"^authors\s*:\s*$", stripped)
@@ -1106,33 +1135,29 @@ function cff_authors(content::AbstractString)
         end
         in_authors || continue
         isempty(stripped) && continue
+        # An unindented line starts a new top-level CFF key, which ends the
+        # authors section: author entries and their fields are always indented.
+        if !isempty(line) && !isspace(first(line))
+            flush_author!()
+            current = Dict{String,String}()
+            break
+        end
         if startswith(stripped, "-")
-            if !isempty(current)
-                given = get(current, "given-names", "")
-                family = get(current, "family-names", "")
-                name = strip(join(filter(!isempty, [given, family]), " "))
-                isempty(name) || push!(authors, name)
-            end
+            flush_author!()
             current = Dict{String,String}()
         end
         m = match(r"^-?\s*([A-Za-z-]+)\s*:\s*(.+?)\s*$", stripped)
         m === nothing && continue
         key = something(m.captures[1], "")
+        key in ("given-names", "family-names", "name", "orcid") || continue
         value = replace(strip(something(m.captures[2], "")), r"^['\"]|['\"]$" => "")
-        if !(key in ("given-names", "family-names", "name"))
-            !isempty(current) && break
-            continue
-        end
         current[key] = value
     end
-    if !isempty(current)
-        given = get(current, "given-names", "")
-        family = get(current, "family-names", get(current, "name", ""))
-        name = strip(join(filter(!isempty, [given, family]), " "))
-        isempty(name) || push!(authors, name)
-    end
-    return authors
+    flush_author!()
+    return entries
 end
+
+cff_authors(content::AbstractString) = [entry.name for entry in cff_author_entries(content)]
 
 function cff_record(provider::ApiProvider, repo_url::AbstractString)
     for cff_url in github_citation_cff_urls(repo_url)
@@ -1145,14 +1170,18 @@ function cff_record(provider::ApiProvider, repo_url::AbstractString)
         doi = cff_scalar(content, "doi")
         released = cff_scalar(content, "date-released")
         cff_url_field = cff_scalar(content, "url")
-        authors = cff_authors(content)
+        entries = cff_author_entries(content)
+        authors = [entry.name for entry in entries]
         if title !== nothing || doi !== nothing || !isempty(authors)
             year = released === nothing ? nothing : normalize_year(released)
+            raw = Dict{String,Any}("citation_url" => cff_url)
+            orcids = Dict(entry.name => entry.orcid for entry in entries if entry.orcid !== nothing)
+            isempty(orcids) || (raw["orcids"] = orcids)
             return SourceRecord(provider="citation-cff", id=String(cff_url),
                 title=title, authors=authors, year=year,
                 doi=doi === nothing ? nothing : normalize_doi(doi),
                 url=something(cff_url_field, String(repo_url)),
-                raw=Dict{String,Any}("citation_url" => cff_url))
+                raw=raw)
         end
     end
     return nothing

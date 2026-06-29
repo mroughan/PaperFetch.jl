@@ -225,14 +225,15 @@ function write_manifest_markdown(path::AbstractString, reports::Vector{EntryRepo
 end
 
 """
-    fetch_pdfs(reports, outdir; cookie_file=nothing, ezproxy=nothing)
+    fetch_pdfs(reports, outdir; cookie_file=nothing, ezproxy=nothing, progress_io=nothing)
 
 Download PDF candidates from reports and write INC and Markdown manifests.
 
 Only explicit PDF candidate URLs are attempted. Missing PDFs are recorded as
 `skipped`, not as validation failures. The function returns the fetch results
 and the path to `manifest.inc`; `manifest.md` is written in the same directory
-for human review.
+for human review. Set `progress_io` to an `IO` stream such as `stderr` to print
+per-reference fetch progress.
 
 # Example
 
@@ -245,35 +246,43 @@ results[1].status == "skipped" && basename(manifest) == "manifest.inc"
 """
 function fetch_pdfs(reports::Vector{EntryReport}, outdir::AbstractString;
         cookie_file::Union{Nothing,String}=nothing, ezproxy::Union{Nothing,String}=nothing,
-        http_get=HTTP.get)
+        http_get=HTTP.get, progress_io::Union{Nothing,IO}=nothing)
     mkpath(outdir)
     cookies = read_cookie_file(cookie_file)
     results = FetchResult[]
-    for report in reports
+    total = length(reports)
+    progress_message(progress_io, "Fetching PDFs for $(total) reference$(total == 1 ? "" : "s")")
+    for (j, report) in enumerate(reports)
+        progress_message(progress_io, "[$(j)/$(total)] $(report.entry.key): checking PDF candidates")
         if isempty(report.pdf_candidates)
             push!(results, FetchResult(report.entry.key, "skipped", nothing, nothing, nothing,
                 no_pdf_reason(report), nothing, 0))
+            progress_message(progress_io, "[$(j)/$(total)] $(report.entry.key): no PDF candidate")
             continue
         end
         base = slugify(get(report.entry.fields, "title", report.entry.key))
         downloaded = false
         for (i, url) in enumerate(report.pdf_candidates)
+            progress_message(progress_io, "[$(j)/$(total)] $(report.entry.key): downloading candidate $(i)/$(length(report.pdf_candidates))")
             dest = joinpath(outdir, i == 1 ? "$(base).pdf" : "$(base)-$(i).pdf")
             ok, final_url, note, digest, nbytes = download_pdf(url, dest; cookies, ezproxy, http_get)
             if ok
                 push!(results, FetchResult(report.entry.key, "downloaded", dest, url,
                     final_url, note, digest, nbytes))
                 downloaded = true
+                progress_message(progress_io, "[$(j)/$(total)] $(report.entry.key): downloaded")
                 break
             else
                 push!(results, FetchResult(report.entry.key, "failed", nothing, url,
                     final_url, note, digest, nbytes))
+                progress_message(progress_io, "[$(j)/$(total)] $(report.entry.key): candidate $(i) failed ($(note))")
             end
         end
         # If all candidates failed, the last FetchResult records the last failure.
-        _ = downloaded
+        downloaded || progress_message(progress_io, "[$(j)/$(total)] $(report.entry.key): no PDF downloaded")
     end
     manifest = write_manifest(joinpath(outdir, "manifest.inc"), results)
     write_manifest_markdown(joinpath(outdir, "manifest.md"), reports, results)
+    progress_message(progress_io, "Finished fetching PDFs for $(total) reference$(total == 1 ? "" : "s")")
     return results, manifest
 end

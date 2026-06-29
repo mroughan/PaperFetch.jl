@@ -24,6 +24,39 @@
   `author`.
 
 ### Validation transparency
+- Added progress reporting for check and fetch workflows. The CLI reports
+  entry-by-entry progress to `stderr` by default, `--quiet` suppresses it, and
+  the Julia API exposes an optional `progress_io` stream for callers that want
+  progress messages.
+- Polished progress reporting: the "Finished fetching PDFs" message now
+  includes the reference count, matching "Finished checking N entries" for
+  symmetry. CLI integration tests now pass `--quiet` to keep test logs clean,
+  since progress message content is already covered by a dedicated
+  `progress reporting` testset using an `IOBuffer`.
+
+### Bug fixes (round 3)
+- Fixed `cff_authors` (CITATION.cff parsing): any author field other than
+  `given-names`/`family-names`/`name` (e.g. `orcid`, `affiliation`) caused the
+  parser to stop reading the authors list entirely, silently dropping every
+  author after the first one with such a field. End-of-authors-section
+  detection is now based on YAML indentation (an unindented line starts a new
+  top-level CFF key) instead of the field name, so extra per-author fields no
+  longer truncate the list.
+- Added `cff_author_entries`, which parses each author's ORCID alongside their
+  name. `cff_record` now stores any captured ORCIDs in `SourceRecord.raw["orcids"]`
+  (keyed by author name) for provenance, since there is no BibTeX field to
+  compare an ORCID against.
+
+### Tests (round 3)
+- Added `cff_author_entries` testset covering: an `orcid` field between two
+  authors (the bug above), a trailing `affiliation` field, a top-level key
+  ending the authors section, single-field `name:` authors, and content with
+  no authors section.
+- Updated the CITATION.cff fixture in `URL metadata and direct PDF lookup` to
+  include an `orcid` field on the first author, asserting both authors are
+  still captured and the ORCID lands in `raw["orcids"]`.
+- Updated `progress reporting` testset to assert the exact symmetric
+  "Finished fetching PDFs for N references" wording.
 - `check_bibliography` now emits a clear `@warn` when it falls back to
   `CandidateProvider` (no fixture, no explicit `providers`, `use_apis=false`),
   since that fallback only echoes each entry's own title/doi/url back as its

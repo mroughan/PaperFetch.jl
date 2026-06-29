@@ -28,11 +28,19 @@ function ignored_key_set(ignore_keys)
     return Set(String.(collect(ignore_keys)))
 end
 
+function progress_message(progress_io::Union{Nothing,IO}, message::AbstractString)
+    progress_io === nothing && return nothing
+    println(progress_io, message)
+    flush(progress_io)
+    return nothing
+end
+
 """
     check_bibliography(path; providers=AbstractProvider[], fixture=nothing,
                        email="noreply@example.org", use_apis=false,
                        cache_dir=nothing, rate_limit_seconds=0.05,
-                       ignore_keys=Set(["anon"]), check=:warn)
+                       ignore_keys=Set(["anon"]), check=:warn,
+                       progress_io=nothing)
 
 Read a bibliography, collect source metadata, and return one `EntryReport` per
 entry.
@@ -59,6 +67,8 @@ Set `cache_dir` to a directory path to cache API responses between runs.
 Set `rate_limit_seconds` to the minimum delay between uncached live API
 requests made by the default `ApiProvider`. Set `ignore_keys=nothing` to keep
 all entries, including review artifacts such as `anon`.
+Set `progress_io` to an `IO` stream such as `stderr` to print entry-by-entry
+progress; leave it as `nothing` for quiet programmatic use.
 
 Identifier recovery is deliberately forgiving: DOI, arXiv, PMID, ISBN, and URL
 values can be extracted from standard fields and common misplaced fields such as
@@ -80,7 +90,9 @@ function check_bibliography(path::AbstractString;
         cache_dir::Union{Nothing,String}        = nothing,
         rate_limit_seconds::Real                = 0.05,
         ignore_keys                             = Set(["anon"]),
-        check::Symbol                           = :warn)
+        check::Symbol                           = :warn,
+        progress_io::Union{Nothing,IO}          = nothing)
+    progress_message(progress_io, "Reading bibliography: $(path)")
     entries = read_items(path; check)
     if ignore_keys !== nothing
         ignored = ignored_key_set(ignore_keys)
@@ -101,7 +113,17 @@ function check_bibliography(path::AbstractString;
               "offline run, or use_apis=true to query live scholarly APIs."
         push!(active, CandidateProvider())
     end
-    return [compare_entry(entry, provider_sources(active, entry)) for entry in entries]
+    total = length(entries)
+    progress_message(progress_io, "Checking $(total) entr$(total == 1 ? "y" : "ies")")
+    reports = EntryReport[]
+    for (i, entry) in enumerate(entries)
+        progress_message(progress_io, "[$(i)/$(total)] $(entry.key): resolving source metadata")
+        sources = provider_sources(active, entry)
+        progress_message(progress_io, "[$(i)/$(total)] $(entry.key): comparing $(length(sources)) source candidate$(length(sources) == 1 ? "" : "s")")
+        push!(reports, compare_entry(entry, sources))
+    end
+    progress_message(progress_io, "Finished checking $(total) entr$(total == 1 ? "y" : "ies")")
+    return reports
 end
 
 export BibEntry,

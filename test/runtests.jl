@@ -301,6 +301,29 @@ end
     @test isfile(joinpath(outdir, "manifest.md"))
 end
 
+@testset "progress reporting" begin
+    check_io = IOBuffer()
+    reports = check_bibliography(example("01_exact_article.bib");
+        fixture=FIXTURE, check=:none, progress_io=check_io)
+    check_text = String(take!(check_io))
+    @test occursin("Reading bibliography", check_text)
+    @test occursin("Checking 1 entry", check_text)
+    @test occursin("[1/1] doe2020exact", check_text)
+    @test occursin("Finished checking 1 entry", check_text)
+
+    fetch_io = IOBuffer()
+    no_pdf_report = EntryReport(BibEntry("progress_no_pdf", "misc", Dict("title" => "No PDF")),
+        SourceRecord[], FieldComparison[], 0.0, String[], String[])
+    results, _ = fetch_pdfs([no_pdf_report], mktempdir();
+        http_get=(_url, _headers; _kwargs...) -> error("no fetch expected"),
+        progress_io=fetch_io)
+    fetch_text = String(take!(fetch_io))
+    @test results[1].status == "skipped"
+    @test occursin("Fetching PDFs for 1 reference", fetch_text)
+    @test occursin("[1/1] progress_no_pdf", fetch_text)
+    @test occursin("Finished fetching PDFs for 1 reference", fetch_text)
+end
+
 @testset "BibTeX and plain input" begin
     entries = read_bibtex(example("01_exact_article.bib"); check=:none)
     @test length(entries) == 1
@@ -762,6 +785,7 @@ end
             authors:
               - family-names: Example
                 given-names: Erin
+                orcid: "https://orcid.org/0000-0000-0000-0001"
               - family-names: Sample
                 given-names: Sam
             """
@@ -811,9 +835,42 @@ end
     @test cff_source.title == "Useful Research Software"
     @test cff_source.doi == "10.5281/zenodo.12345"
     @test cff_source.year == "2024"
+    # An `orcid` field on the first author must not truncate the author list (regression).
     @test cff_source.authors == ["Erin Example", "Sam Sample"]
     @test cff_source.raw["citation_url"] ==
         "https://raw.githubusercontent.com/example/project/main/CITATION.cff"
+    # ORCID has no BibTeX field to compare against, but is preserved for provenance.
+    @test cff_source.raw["orcids"]["Erin Example"] == "https://orcid.org/0000-0000-0000-0001"
+    @test !haskey(cff_source.raw["orcids"], "Sam Sample")
+end
+
+@testset "cff_author_entries" begin
+    # Extra per-author fields (orcid, affiliation) must not drop later authors.
+    multi = """
+    authors:
+      - family-names: Smith
+        given-names: Jane
+        orcid: "https://orcid.org/0000-0000-0000-0000"
+      - family-names: Doe
+        given-names: John
+        affiliation: Example University
+    title: Example Software
+    version: "1.0"
+    """
+    entries = PaperFetch.cff_author_entries(multi)
+    @test [e.name for e in entries] == ["Jane Smith", "John Doe"]
+    @test entries[1].orcid == "https://orcid.org/0000-0000-0000-0000"
+    @test entries[2].orcid === nothing
+
+    # A top-level key after the authors list ends the section correctly.
+    @test PaperFetch.cff_authors(multi) == ["Jane Smith", "John Doe"]
+
+    # `name:` (single-field) authors are also supported.
+    single_field = "authors:\n  - name: Example Org\n"
+    @test PaperFetch.cff_authors(single_field) == ["Example Org"]
+
+    # No authors section at all.
+    @test isempty(PaperFetch.cff_authors("title: No Authors Here\n"))
 end
 
 @testset "provider URL construction and errors" begin
@@ -1166,13 +1223,14 @@ end
 
 @testset "CLI check mode" begin
     outdir = mktempdir()
-    PaperFetch.main(["check", example("01_exact_article.bib"), "--fixture", FIXTURE, "--outdir", outdir])
+    PaperFetch.main(["check", example("01_exact_article.bib"), "--fixture", FIXTURE,
+        "--outdir", outdir, "--quiet"])
     @test isfile(joinpath(outdir, "01_exact_article.md"))
     @test isfile(joinpath(outdir, "01_exact_article.inc"))
 
     custom_outdir = mktempdir()
     PaperFetch.main(["check", example("01_exact_article.bib"), "--fixture", FIXTURE,
-        "--outdir", custom_outdir, "--report-basename", "paperfetch_report"])
+        "--outdir", custom_outdir, "--report-basename", "paperfetch_report", "--quiet"])
     @test isfile(joinpath(custom_outdir, "paperfetch_report.md"))
     @test isfile(joinpath(custom_outdir, "paperfetch_report.inc"))
 
@@ -1188,6 +1246,7 @@ end
         "--ignore-keys", "anon,draft",
         "--cookie-file", "cookies.txt",
         "--ezproxy", "https://proxy.example/login?url={url}",
+        "--quiet",
     ])
     @test parsed["mode"] == "fetch"
     @test parsed["report-basename"] == "custom_report"
@@ -1197,6 +1256,7 @@ end
     @test parsed["ignore-keys"] == "anon,draft"
     @test parsed["cookie-file"] == "cookies.txt"
     @test parsed["ezproxy"] == "https://proxy.example/login?url={url}"
+    @test parsed["quiet"] == true
 end
 
 @testset "CLI fetch and invalid mode" begin
@@ -1215,7 +1275,7 @@ end
       "year":"2024"
     }]}
     """)
-    PaperFetch.main(["fetch", bib, "--fixture", fixture, "--outdir", outdir])
+    PaperFetch.main(["fetch", bib, "--fixture", fixture, "--outdir", outdir, "--quiet"])
     @test isfile(joinpath(outdir, "nopdf.md"))
     @test isfile(joinpath(outdir, "nopdf.inc"))
     @test isfile(joinpath(outdir, "manifest.inc"))

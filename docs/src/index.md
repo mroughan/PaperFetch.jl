@@ -31,6 +31,9 @@ A fixture is a small JSON file containing known source metadata for examples or
 tests. It lets PaperFetch.jl exercise the same comparison and reporting logic
 without making live API requests, so results are deterministic and repeatable.
 
+The command-line tool prints progress to `stderr` as it reads, checks, and
+fetches entries. Pass `--quiet` to suppress progress messages in scripted runs.
+
 This writes:
 
 - `paperfetch_out/01_exact_article.md`

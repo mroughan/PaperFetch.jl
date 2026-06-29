@@ -34,6 +34,9 @@ function parse_cli(args)
             help = "Optional local Netscape cookies.txt file for credential-assisted fetching"
         "--ezproxy"
             help = "Optional EZproxy template, e.g. https://proxy.example.edu/login?url={url}"
+        "--quiet"
+            help   = "Suppress progress messages"
+            action = :store_true
     end
     return parse_args(args, settings)
 end
@@ -45,7 +48,8 @@ Command-line entry point.
 
 `check` writes Markdown and INC reports. `fetch` also writes `manifest.inc`,
 `manifest.md`, and any successfully downloaded PDFs. Report basenames default
-to the input file stem unless `--report-basename` is supplied.
+to the input file stem unless `--report-basename` is supplied. Progress is
+written to `stderr` by default; pass `--quiet` to suppress it.
 
 # Example
 
@@ -65,6 +69,7 @@ function main(args=ARGS)
     end
     report_basename = something(options["report-basename"],
         first(splitext(basename(options["input"]))))
+    progress_io = options["quiet"] ? nothing : stderr
 
     reports = check_bibliography(options["input"];
         fixture            = options["fixture"],
@@ -73,7 +78,8 @@ function main(args=ARGS)
         cache_dir          = options["cache-dir"],
         rate_limit_seconds = rate_limit_seconds,
         ignore_keys        = ignore_keys,
-        check              = :warn)
+        check              = :warn,
+        progress_io        = progress_io)
     paths = write_reports(reports, options["outdir"]; basename=report_basename)
     println("Wrote: $(paths[:markdown])")
     println("Wrote: $(paths[:inc])")
@@ -81,7 +87,8 @@ function main(args=ARGS)
     if mode == "fetch"
         _, manifest = fetch_pdfs(reports, options["outdir"];
             cookie_file = options["cookie-file"],
-            ezproxy     = options["ezproxy"])
+            ezproxy     = options["ezproxy"],
+            progress_io = progress_io)
         println("Wrote: $(manifest)")
         println("Wrote: $(joinpath(options["outdir"], "manifest.md"))")
     end
