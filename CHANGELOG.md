@@ -281,12 +281,12 @@
   keywords.
 
 ### CI/CD
-- Tightened the Codecov upload step so coverage is uploaded once from the Julia
-  1.11 CI job, with an explicit repository slug and `fail_ci_if_error=false`.
-  Codecov repository activation still has to be handled in Codecov/GitHub, but
-  the workflow no longer sends duplicate matrix uploads.
-- Added `.github/workflows/ci.yml`: tests on Julia 1.11 and nightly
-  with Codecov coverage upload.
+- Added `.github/workflows/codecov.yml` as a dedicated Codecov workflow. It runs
+  coverage once on Julia 1.11, uploads with an explicit repository slug, and
+  uses `fail_ci_if_error=false`. Codecov repository activation still has to be
+  handled in Codecov/GitHub, but coverage upload is now visible as its own
+  workflow.
+- Added `.github/workflows/ci.yml`: tests on Julia 1.11 and nightly.
 - Added separate `.github/workflows/jet.yml` and `.github/workflows/aqua.yml`
   checks on latest stable Julia only.
 - Added `.github/workflows/documenter.yml`: Documenter.jl documentation build
