@@ -1112,21 +1112,23 @@ content = "authors:\\n  - family-names: Doe\\n    given-names: Jane\\n"
 PaperFetch.cff_author_entries(content)[1].name == "Jane Doe"
 ```
 """
+function flush_cff_author!(entries::Vector{NamedTuple{(:name, :orcid), Tuple{String,Union{Nothing,String}}}},
+        current::Dict{String,String})
+    isempty(current) && return nothing
+    given = get(current, "given-names", "")
+    family = get(current, "family-names", get(current, "name", ""))
+    name = strip(join(filter(!isempty, String[given, family]), " "))
+    if !isempty(name)
+        orcid = get(current, "orcid", nothing)
+        push!(entries, (name=name, orcid=(orcid === nothing || isempty(orcid)) ? nothing : orcid))
+    end
+    return nothing
+end
+
 function cff_author_entries(content::AbstractString)
     entries = NamedTuple{(:name, :orcid), Tuple{String,Union{Nothing,String}}}[]
     current = Dict{String,String}()
     in_authors = false
-    function flush_author!()
-        isempty(current) && return nothing
-        given = get(current, "given-names", "")
-        family = get(current, "family-names", get(current, "name", ""))
-        name = strip(join(filter(!isempty, [given, family]), " "))
-        if !isempty(name)
-            orcid = get(current, "orcid", nothing)
-            push!(entries, (name=name, orcid=(orcid === nothing || isempty(orcid)) ? nothing : orcid))
-        end
-        return nothing
-    end
     for line in split(content, '\n')
         stripped = strip(line)
         if occursin(r"^authors\s*:\s*$", stripped)
@@ -1138,12 +1140,12 @@ function cff_author_entries(content::AbstractString)
         # An unindented line starts a new top-level CFF key, which ends the
         # authors section: author entries and their fields are always indented.
         if !isempty(line) && !isspace(first(line))
-            flush_author!()
+            flush_cff_author!(entries, current)
             current = Dict{String,String}()
             break
         end
         if startswith(stripped, "-")
-            flush_author!()
+            flush_cff_author!(entries, current)
             current = Dict{String,String}()
         end
         m = match(r"^-?\s*([A-Za-z-]+)\s*:\s*(.+?)\s*$", stripped)
@@ -1153,7 +1155,7 @@ function cff_author_entries(content::AbstractString)
         value = replace(strip(something(m.captures[2], "")), r"^['\"]|['\"]$" => "")
         current[key] = value
     end
-    flush_author!()
+    flush_cff_author!(entries, current)
     return entries
 end
 

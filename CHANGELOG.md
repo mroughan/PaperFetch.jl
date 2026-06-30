@@ -42,6 +42,9 @@
   `progress reporting` testset using an `IOBuffer`.
 
 ### Bug fixes (round 3)
+- Refactored the `CITATION.cff` author parser to avoid a closure over a
+  reassigned dictionary. This keeps the parser behaviour unchanged while making
+  the possible value types explicit enough for JET on current Julia.
 - Fixed `cff_authors` (CITATION.cff parsing): any author field other than
   `given-names`/`family-names`/`name` (e.g. `orcid`, `affiliation`) caused the
   parser to stop reading the authors list entirely, silently dropping every
@@ -278,6 +281,10 @@
   keywords.
 
 ### CI/CD
+- Tightened the Codecov upload step so coverage is uploaded once from the Julia
+  1.11 CI job, with an explicit repository slug and `fail_ci_if_error=false`.
+  Codecov repository activation still has to be handled in Codecov/GitHub, but
+  the workflow no longer sends duplicate matrix uploads.
 - Added `.github/workflows/ci.yml`: tests on Julia 1.11 and nightly
   with Codecov coverage upload.
 - Added separate `.github/workflows/jet.yml` and `.github/workflows/aqua.yml`
