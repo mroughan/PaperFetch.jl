@@ -30,6 +30,10 @@ function parse_cli(args)
         "--ignore-keys"
             help    = "Comma-separated BibTeX keys to skip during checking"
             default = "anon"
+        "--no-verify-pdf-text"
+            help   = "Disable full-text PDF verification (on by default with --use-apis) " *
+                     "as a last resort for entries no provider could confirm"
+            action = :store_true
         "--cookie-file"
             help = "Optional local Netscape cookies.txt file for credential-assisted fetching"
         "--ezproxy"
@@ -50,6 +54,11 @@ Command-line entry point.
 `manifest.md`, and any successfully downloaded PDFs. Report basenames default
 to the input file stem unless `--report-basename` is supplied. Progress is
 written to `stderr` by default; pass `--quiet` to suppress it.
+
+When `--use-apis` is set, `check` also attempts full-text PDF verification as
+a last resort for entries no metadata provider could confirm (downloading one
+PDF candidate and checking its extracted text for the entry's title, author,
+and year); pass `--no-verify-pdf-text` to disable that.
 
 # Example
 
@@ -79,6 +88,7 @@ function main(args=ARGS)
         rate_limit_seconds = rate_limit_seconds,
         ignore_keys        = ignore_keys,
         check              = :warn,
+        verify_pdf_text    = options["use-apis"] && !options["no-verify-pdf-text"],
         progress_io        = progress_io)
     paths = write_reports(reports, options["outdir"]; basename=report_basename)
     println("Wrote: $(paths[:markdown])")

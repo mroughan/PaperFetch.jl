@@ -69,6 +69,42 @@ journal article while the other is an arXiv preprint of the same work,
 PaperFetch.jl prefers the journal article and records that decision in the entry
 notes.
 
+### Scoring And Near-Ties
+
+A candidate's score only reflects the fields it actually reports: a field the
+source did not supply is excluded from the score entirely rather than
+counted against it. This means a source that supplies very little
+information can score a perfect match on the one or two fields it does
+report — for example, a landing page whose only usable field happens to
+equal the entry's own `url` — while a source such as Crossref or OpenAlex,
+which independently confirmed many fields but was not a perfect match on
+every one of them (say, a normalized rather than byte-identical page range),
+scores slightly lower.
+
+To stop a near-empty record from winning purely by having less to disagree
+about, PaperFetch.jl prefers whichever candidate within a small score margin
+of the top score independently verified the most fields. When this changes
+which source is selected, the entry notes record it explicitly, for example:
+
+```
+preferred crossref (0.984, 7 verified fields) over url-metadata (1.0, 1
+verified field), which scored marginally higher but with less
+independently-verified metadata
+```
+
+### Full-Text PDF Verification
+
+As a last resort, when no provider can confirm an entry, but a PDF candidate
+URL is known, `check` (with `--use-apis`, unless `--no-verify-pdf-text` is
+set) downloads that one PDF and checks its extracted text for the entry's
+title, author, and year. Only fields actually found in the text are
+reported, so a partial match is discarded by the same "insufficient identity
+evidence" rule as any other candidate; a full match appears in the notes as a
+`pdf-text` (or `pdf-ocr`, if OCR was needed for a scanned PDF) source, clearly
+attributed as weaker, last-resort evidence. See
+[Full-Text PDF Verification](https://github.com/mroughan/PaperFetch.jl/blob/main/README.md#full-text-pdf-verification-last-resort)
+in the README for the optional `pdftotext`/`tesseract` tools this uses.
+
 ## Required And Supplementary Fields
 
 Required fields depend on the BibTeX entry type. For example:

@@ -299,6 +299,20 @@ end
     @test results[1].status == "skipped"
     @test basename(manifest) == "manifest.inc"
     @test isfile(joinpath(outdir, "manifest.md"))
+
+    # Mirrors of the plain (non-`jldoctest`) `# Example` blocks in
+    # `comparison_richness`, `extract_pdf_text`, and `pdf_text_confirmation`
+    # docstrings, since Documenter does not execute those blocks itself.
+    cmps = [FieldComparison("title", :exact, "A", "A", ""), FieldComparison("year", :missing_source, "2020", nothing, "")]
+    @test PaperFetch.comparison_richness(cmps) == 1
+
+    missing_result = PaperFetch.extract_pdf_text("/nonexistent/missing.pdf")
+    @test missing_result.text == ""
+
+    rich_entry = BibEntry("x", "article", Dict("title" => "A Field-Rich Paper", "year" => "2020"))
+    rich_source = PaperFetch.pdf_text_confirmation(rich_entry, "Cover page. A Field-Rich Paper. 2020.",
+        "https://example.org/paper.pdf"; provider="pdf-text")
+    @test rich_source.title == "A Field-Rich Paper" && rich_source.year == "2020"
 end
 
 @testset "progress reporting" begin
@@ -797,6 +811,32 @@ end
     version_report = compare_entry(version_entry, [preprint, journal])
     @test occursin("crossref-search", version_report.notes[1])
     @test any(note -> occursin("preferred journal-article metadata", note), version_report.notes)
+
+    # A source that only matches one field scores a perfect 1.0 on that
+    # field alone (missing fields are excluded from the average rather than
+    # penalized), which can nominally edge out a source that independently
+    # verified many fields but wasn't a perfect match on every one. Within
+    # `SOURCE_RESOLUTION_TIE_MARGIN`, the richer source must still win.
+    rich_entry = BibEntry("richness_check", "article", Dict(
+        "author"    => "Example, Ada",
+        "title"     => "A Field-Rich Paper",
+        "year"      => "2020",
+        "journal"   => "Journal of Examples",
+        "pages"     => "1--10",
+        "publisher" => "Example Press",
+        "doi"       => "10.5555/rich",
+        "url"       => "https://example.org/rich",
+    ))
+    sparse_perfect_url = SourceRecord(provider="sparse-echo",
+        url="https://example.org/rich")
+    rich_near_match = SourceRecord(provider="rich-source",
+        title="A Field-Rich Paper", authors=["Ada Example"], year="2020",
+        journal="Journal of Examples", pages="1-10", publisher="Example Press",
+        doi="10.5555/rich")
+    richness_report = compare_entry(rich_entry, [sparse_perfect_url, rich_near_match])
+    @test occursin("best source: rich-source", richness_report.notes[1])
+    @test any(note -> occursin("preferred rich-source", note) && occursin("sparse-echo", note),
+        richness_report.notes)
 end
 
 @testset "URL metadata and direct PDF lookup" begin
@@ -868,6 +908,268 @@ end
     # ORCID has no BibTeX field to compare against, but is preserved for provenance.
     @test cff_source.raw["orcids"]["Erin Example"] == "https://orcid.org/0000-0000-0000-0001"
     @test !haskey(cff_source.raw["orcids"], "Sam Sample")
+end
+
+@testset "DOI-echo URLs do not inflate source ranking" begin
+    doi_url = "https://doi.org/10.1109/tc.1973.5009113"
+    entry = BibEntry("brent1973", "article", Dict("url" => doi_url))
+
+    # A landing page fetched from a DOI resolver link that exposes no
+    # citation metadata (e.g. IEEE Xplore) must not report `url` as
+    # independently-matching evidence: that field would only be the input
+    # URL echoed back, not information the page actually provided.
+    empty_provider = PaperFetch.ApiProvider(
+        get_text=(url; headers=Pair{String,String}[]) -> "<html></html>")
+    record = only(PaperFetch.url_records(empty_provider, doi_url, entry))
+    @test record.provider == "url-metadata"
+    @test record.url === nothing
+    @test record.id == doi_url
+
+    # `url_records` is only ever called on a URL already extracted from the
+    # entry itself (see `sources_for`'s `:url` branch), so even an ordinary
+    # (non-DOI) landing-page URL is never independent information -- it must
+    # not be echoed back as `url` either, only kept as `id` for display.
+    landing_url = "https://example.org/paper-landing-page"
+    landing_record = only(PaperFetch.url_records(empty_provider, landing_url, entry))
+    @test landing_record.url === nothing
+    @test landing_record.id == landing_url
+
+    # A direct PDF fetched via a DOI resolver link must not echo the DOI URL
+    # or claim the entry's own title as independently-verified metadata.
+    pdf_provider = PaperFetch.ApiProvider(
+        get_text=(url; headers=Pair{String,String}[]) -> "%PDF-1.7\nfixture")
+    pdf_record = only(PaperFetch.url_records(pdf_provider, doi_url, entry))
+    @test pdf_record.provider == "url-pdf"
+    @test pdf_record.url === nothing
+    @test pdf_record.title === nothing
+    @test pdf_record.pdf_url == doi_url
+end
+
+@testset "richer metadata wins a near-tied source-resolution score" begin
+    # Regression for the Brent (1973) IEEE Transactions on Computers entry:
+    # Crossref independently confirmed doi/title/author/year/journal/pages/
+    # publisher (score 0.984) but was previously outranked by a DOI-resolver
+    # landing page that exposed no citation metadata and so only "matched"
+    # the entry's own echoed-back URL (score 1.0).
+    doi = "10.1109/tc.1973.5009113"
+    doi_url = "https://doi.org/$(doi)"
+    entry = BibEntry("brent1973_on", "article", Dict(
+        "author"    => "Brent, Richard P.",
+        "title"     => "On the Precision Attainable with Various Floating-Point Number Systems",
+        "year"      => "1973",
+        "journal"   => "IEEE Transactions on Computers",
+        "publisher" => "Institute of Electrical and Electronics Engineers (IEEE)",
+        "pages"     => "601--607",
+        "doi"       => doi,
+        "url"       => doi_url,
+    ))
+
+    function fake_json(url; headers=Pair{String,String}[])
+        if occursin("api.crossref.org/works/", url)
+            return JSON3.read("""
+            {"message":{
+              "DOI":"$(doi)",
+              "title":["On the Precision Attainable with Various Floating-Point Number Systems"],
+              "author":[{"given":"Richard P.","family":"Brent"}],
+              "issued":{"date-parts":[[1973]]},
+              "URL":"$(doi_url)",
+              "container-title":["IEEE Transactions on Computers"],
+              "page":"601-607",
+              "publisher":"Institute of Electrical and Electronics Engineers (IEEE)"
+            }}
+            """)
+        end
+        return JSON3.read("{}")
+    end
+    # The DOI resolver landing page exposes no citation metadata, as with
+    # IEEE Xplore, so the only thing `url_records` could report is the
+    # entry's own URL echoed back.
+    fake_text(url; headers=Pair{String,String}[]) = "<html></html>"
+
+    provider = PaperFetch.ApiProvider(get_json=fake_json, get_text=fake_text)
+    sources = PaperFetch.sources_for(provider, entry)
+    @test any(source -> source.provider == "url-metadata" && source.url === nothing, sources)
+
+    report = PaperFetch.compare_entry(entry, sources)
+    @test report.confidence > 0.9
+    @test any(note -> occursin("best source: crossref", note), report.notes)
+    @test !any(note -> occursin("does not match this entry's title/author", note), report.notes)
+end
+
+"""
+    write_minimal_text_pdf(path, lines)
+
+Write a minimal, hand-built born-digital PDF whose page contains `lines` of
+text, for exercising `pdftotext`-based extraction in tests without a real
+paper. The PDF has no valid xref table; poppler tolerates this by
+reconstructing it from the object bodies.
+"""
+function write_minimal_text_pdf(path::AbstractString, lines::Vector{String})
+    y = 700
+    ops = String[]
+    for line in lines
+        escaped = replace(line, "\\" => "\\\\", "(" => "\\(", ")" => "\\)")
+        push!(ops, "BT /F1 18 Tf 72 $(y) Td ($(escaped)) Tj ET")
+        y -= 30
+    end
+    stream = join(ops, "\n")
+    pdf = """
+    %PDF-1.4
+    1 0 obj
+    << /Type /Catalog /Pages 2 0 R >>
+    endobj
+    2 0 obj
+    << /Type /Pages /Kids [3 0 R] /Count 1 >>
+    endobj
+    3 0 obj
+    << /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /MediaBox [0 0 612 792] /Contents 5 0 R >>
+    endobj
+    4 0 obj
+    << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+    endobj
+    5 0 obj
+    << /Length $(length(stream)) >>
+    stream
+    $(stream)
+    endstream
+    endobj
+    trailer
+    << /Root 1 0 R >>
+    %%EOF
+    """
+    write(path, pdf)
+    return path
+end
+
+"""
+    write_minimal_scanned_pdf(path, caption)
+
+Write a single-page, image-only PDF (no text layer) rendering `caption`, via
+ImageMagick's `convert`, for exercising the OCR fallback path in tests.
+"""
+function write_minimal_scanned_pdf(path::AbstractString, caption::AbstractString)
+    dir = mktempdir()
+    png = joinpath(dir, "page.png")
+    run(pipeline(`convert -size 900x200 -background white -fill black -pointsize 28
+        -gravity center caption:$(caption) $(png)`; stdout=devnull, stderr=devnull))
+    run(pipeline(`convert $(png) $(path)`; stdout=devnull, stderr=devnull))
+    return path
+end
+
+@testset "pdf_text_confirmation matches only what the extracted text confirms" begin
+    entry = BibEntry("brent1973_on", "article", Dict(
+        "author" => "Brent, Richard P.",
+        "title"  => "On the Precision Attainable with Various Floating-Point Number Systems",
+        "year"   => "1973",
+    ))
+    full_text = "IEEE Transactions on Computers. On the Precision Attainable with Various " *
+        "Floating-Point Number Systems. Richard P. Brent. 1973. pp. 601-607."
+    confirmed = PaperFetch.pdf_text_confirmation(entry, full_text, "https://example.org/paper.pdf";
+        provider="pdf-text")
+    @test confirmed.title == entry.fields["title"]
+    @test confirmed.authors == [entry.fields["author"]]
+    @test confirmed.year == "1973"
+    @test confirmed.pdf_url == "https://example.org/paper.pdf"
+
+    # A field absent from the extracted text must stay unconfirmed, not
+    # silently inherited from the entry -- this is exactly what distinguishes
+    # a real verification from the `url_records` self-echo bug fixed above.
+    unrelated_text = "Some unrelated cover page with no bibliographic details."
+    unconfirmed = PaperFetch.pdf_text_confirmation(entry, unrelated_text, "https://example.org/x.pdf";
+        provider="pdf-text")
+    @test unconfirmed.title === nothing
+    @test isempty(unconfirmed.authors)
+    @test unconfirmed.year === nothing
+
+    # A fully-confirmed pdf-text source flows through the same comparison
+    # machinery as any other provider and is treated as reliable evidence; a
+    # source with nothing confirmed is discarded the same way a title-only
+    # source from any other provider would be.
+    confirmed_report = compare_entry(entry, [confirmed])
+    @test confirmed_report.confidence > 0.0
+    @test occursin("best source: pdf-text", confirmed_report.notes[1])
+
+    unconfirmed_report = compare_entry(entry, [unconfirmed])
+    @test unconfirmed_report.confidence == 0.0
+end
+
+if PaperFetch.pdftotext_available()
+    @testset "extract_pdf_text reads a born-digital PDF's text layer" begin
+        dir = mktempdir()
+        pdf = write_minimal_text_pdf(joinpath(dir, "born_digital.pdf"),
+            ["On the Precision Attainable", "Richard P. Brent 1973"])
+        result = PaperFetch.extract_pdf_text(pdf)
+        @test result.method == :text
+        @test occursin("On the Precision Attainable", result.text)
+        @test occursin("Richard P. Brent 1973", result.text)
+    end
+else
+    @info "pdftotext not installed; skipping born-digital PDF extraction test"
+end
+
+if PaperFetch.ocr_tools_available() && Sys.which("convert") !== nothing
+    @testset "extract_pdf_text falls back to OCR for a scanned PDF" begin
+        dir = mktempdir()
+        pdf = write_minimal_scanned_pdf(joinpath(dir, "scanned.pdf"),
+            "On the Precision Attainable\\nRichard P. Brent 1973")
+        result = PaperFetch.extract_pdf_text(pdf)
+        @test result.method == :ocr
+        @test occursin("Precision", result.text)
+        @test occursin("Brent", result.text)
+    end
+else
+    @info "pdftoppm, tesseract, or convert not installed; skipping OCR fallback test"
+end
+
+if PaperFetch.pdftotext_available()
+    @testset "check_bibliography verifies an otherwise-unresolved entry via PDF text" begin
+        # The title is deliberately long enough that `pdftotext`'s extracted
+        # text clears `PDF_TEXT_MIN_CHARS`, so this test exercises the
+        # born-digital text path deterministically rather than incidentally
+        # falling through to the OCR path on a too-short fixture.
+        title = "A Sufficiently Long and Field-Rich Paper Title for Extraction"
+        dir = mktempdir()
+        pdf_path = write_minimal_text_pdf(joinpath(dir, "source.pdf"),
+            [title, "Ada Example 2020"])
+
+        bib = joinpath(dir, "pdf_only.bib")
+        write(bib, """
+        @article{pdf_only_key,
+          author = {Example, Ada},
+          title = {$(title)},
+          year = {2020},
+          url = {https://example.org/direct.pdf}
+        }
+        """)
+
+        # The entry's `url` points straight at a PDF (no metadata provider can
+        # resolve it), so the only source is a metadata-free `url-pdf` record;
+        # `verify_pdf_text` must download it (via the mocked `pdf_http_get`)
+        # and confirm title/author/year from its extracted text. Each mock
+        # re-reads the file rather than sharing one `Vector{UInt8}`, since
+        # `String(::Vector{UInt8})` takes ownership of (empties) its argument
+        # -- sharing a buffer between the two mocks would starve whichever
+        # one runs second.
+        fake_provider = PaperFetch.ApiProvider(
+            get_text=(url; headers=Pair{String,String}[]) -> read(pdf_path, String),
+            get_json=(url; headers=Pair{String,String}[]) -> JSON3.read("{}"))
+        fake_pdf_get(_url, _headers; _kwargs...) =
+            HTTP.Response(200, ["Content-Type" => "application/pdf"]; body=read(pdf_path))
+
+        reports = check_bibliography(bib; providers=[fake_provider],
+            verify_pdf_text=true, pdf_http_get=fake_pdf_get, check=:none)
+        report = only(reports)
+        @test any(source -> source.provider == "url-pdf", report.sources)
+        @test report.confidence > 0.0
+        @test occursin("best source: pdf-text", report.notes[1])
+
+        # With the fallback disabled, the same entry is left unresolved.
+        unverified = only(check_bibliography(bib; providers=[fake_provider],
+            verify_pdf_text=false, check=:none))
+        @test unverified.confidence == 0.0
+    end
+else
+    @info "pdftotext not installed; skipping check_bibliography PDF-text fallback test"
 end
 
 @testset "cff_author_entries" begin
@@ -953,6 +1255,8 @@ end
     @test first(PaperFetch.openlibrary_isbn_records(failing, "9783161484100")).provider == "openlibrary-error"
     @test first(PaperFetch.google_books_records(failing, "title")).provider == "google-books-error"
     @test first(PaperFetch.url_records(failing, "https://example.org/page", BibEntry("x", "misc", Dict()))).provider == "url-error"
+    @test first(PaperFetch.internet_archive_search_records(failing,
+        BibEntry("x", "book", Dict("title" => "T")))).provider == "internet-archive-error"
 end
 
 @testset "pubmed search with zero hits does not error" begin
@@ -1003,6 +1307,29 @@ end
               "industryIdentifiers":[{"type":"ISBN_13","identifier":"9781111111111"}]
             }}]}
             """)
+        elseif occursin("archive.org/advancedsearch.php", url)
+            return JSON3.read("""
+            {"response":{"docs":[
+              {
+                "identifier":"iabook0001",
+                "title":"Scanned Archive Book",
+                "creator":["Ivy Archive", "Anna Archive"],
+                "year":1955,
+                "publisher":"Archive Press",
+                "isbn":["1111111111", "2222222222"]
+              },
+              {
+                "identifier":"iabook0002",
+                "title":"Single Value Archive Book",
+                "creator":"Solo Archive",
+                "year":1960,
+                "isbn":"3333333333"
+              },
+              {
+                "title":"Missing Identifier Is Skipped"
+              }
+            ]}}
+            """)
         else
             return JSON3.read("{}")
         end
@@ -1023,6 +1350,25 @@ end
     google_sources = PaperFetch.google_books_records(provider, "Google Book")
     @test google_sources[1].publisher == "Google Books Press"
     @test google_sources[1].raw["isbn"] == ["9781111111111"]
+
+    # Internet Archive (Solr-backed) reports multi-valued fields as a JSON
+    # list and single-valued fields as a bare scalar for the same field name,
+    # so both shapes must parse to the same `Vector{String}` representation.
+    ia_sources = PaperFetch.internet_archive_search_records(provider, entry)
+    @test length(ia_sources) == 2  # the doc with no `identifier` is skipped
+    multi = only(filter(s -> s.id == "iabook0001", ia_sources))
+    @test multi.authors == ["Ivy Archive", "Anna Archive"]
+    @test multi.year == "1955"
+    @test multi.raw["isbn"] == ["1111111111", "2222222222"]
+    @test multi.url == "https://archive.org/details/iabook0001"
+    @test multi.pdf_url == "https://archive.org/download/iabook0001/iabook0001.pdf"
+    single = only(filter(s -> s.id == "iabook0002", ia_sources))
+    @test single.authors == ["Solo Archive"]
+    @test single.raw["isbn"] == ["3333333333"]
+
+    # Book-type entries route through Internet Archive during title search.
+    book_search_sources = PaperFetch.title_search_records(provider, entry)
+    @test any(s -> s.provider == "internet-archive", book_search_sources)
 end
 
 @testset "comparison statuses from examples" begin
@@ -1272,6 +1618,7 @@ end
         "--ignore-keys", "anon,draft",
         "--cookie-file", "cookies.txt",
         "--ezproxy", "https://proxy.example/login?url={url}",
+        "--no-verify-pdf-text",
         "--quiet",
     ])
     @test parsed["mode"] == "fetch"
@@ -1282,7 +1629,15 @@ end
     @test parsed["ignore-keys"] == "anon,draft"
     @test parsed["cookie-file"] == "cookies.txt"
     @test parsed["ezproxy"] == "https://proxy.example/login?url={url}"
+    @test parsed["no-verify-pdf-text"] == true
     @test parsed["quiet"] == true
+
+    # Without --use-apis, full-text PDF verification is never attempted
+    # regardless of --no-verify-pdf-text (there is no live provider to have
+    # left an entry unresolved via network lookup in the first place).
+    default_parsed = PaperFetch.parse_cli(["check", example("01_exact_article.bib")])
+    @test default_parsed["use-apis"] == false
+    @test default_parsed["no-verify-pdf-text"] == false
 end
 
 @testset "CLI fetch and invalid mode" begin

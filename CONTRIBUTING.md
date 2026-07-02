@@ -33,6 +33,33 @@ julia --project=docs docs/make.jl
 The default tests are offline and deterministic. They should not require
 network access, library credentials, browser cookies, or provider availability.
 
+## Optional System Tools
+
+Full-text PDF verification (see the README's
+[External Tools](README.md#external-tools-optional)) shells out to
+`pdftotext` and, for scanned PDFs, `pdftoppm`/`tesseract`. A few tests also
+use ImageMagick's `convert` to build a synthetic scanned-PDF fixture. None of
+these are Julia packages, so `Pkg.instantiate()` does not install them.
+
+Install on Debian/Ubuntu with:
+
+```bash
+sudo apt install poppler-utils tesseract-ocr imagemagick
+```
+
+or on macOS with:
+
+```bash
+brew install poppler tesseract imagemagick
+```
+
+Each test that needs one of these tools checks for it first
+(`pdftotext_available()`, `ocr_tools_available()`, `Sys.which("convert")`) and
+prints an `@info` message and skips itself if the tool is missing, rather than
+failing. This keeps the default test suite runnable without these tools, but
+installing them lets you exercise the full-text/OCR verification code paths
+locally before relying on CI to catch a regression there.
+
 ## Optional Online Field Tests
 
 Online tests are intentionally separate because API responses and network
@@ -109,7 +136,19 @@ Provider code should:
 - use polite request headers and the configured contact email where APIs support
   it;
 - support cacheable deterministic responses through `ApiProvider`;
-- have offline tests using mocked JSON/XML/HTML responses.
+- have offline tests using mocked JSON/XML/HTML responses;
+- only set a `SourceRecord` field from information the provider actually
+  returned, never by echoing back a value already present on the input
+  `BibEntry` or on the query used to fetch it — otherwise a source with no
+  real evidence can "match" trivially and outrank a source that did verify
+  something. `url_records` had this bug (fixed by never setting `url`, since
+  it is only ever called on a URL already known from the entry) and it is a
+  useful pattern to check for in new adapters, especially ones that echo
+  their own query terms back;
+- watch for a Solr-style field that is a bare scalar when an item has one
+  value and a JSON array when it has several (`internet_archive_search_records`'s
+  `string_or_list` helper handles this) — a common shape for search APIs
+  backed by Solr or Elasticsearch, not just Internet Archive's.
 
 When provider metadata disagrees with the bibliography, prefer a clear report
 status over silent correction. Hard conflicts in title, author, identifiers, or

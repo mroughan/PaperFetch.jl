@@ -95,5 +95,13 @@ without PDF candidates are recorded as `skipped`, not as validation failures.
   resolver links and HTTP(S) hosts.
 - Author order is treated as meaningful. Reordered author lists are marked for
   manual review rather than accepted silently.
-- Network API use is opt-in.
+- A source record only counts as evidence for fields it actually reports.
+  Among near-tied candidates, the one that independently verified the most
+  fields is preferred over one that scored marginally higher by having fewer
+  fields to disagree on.
+- Network API use is opt-in. Downloading a file just to check a bibliography
+  is otherwise avoided, with one deliberate, narrowly-scoped exception: when
+  no metadata provider can confirm an entry, but a PDF candidate URL is known,
+  `check` can download that one PDF and check its extracted text (OCR as a
+  last resort for scanned PDFs) for the title, author, and year.
 - Default tests and examples are offline and deterministic.

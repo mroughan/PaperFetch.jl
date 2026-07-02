@@ -22,3 +22,5 @@ docs/build/
 
 Manifest.toml
 Manifest.toml.tmp
+
+.claude/

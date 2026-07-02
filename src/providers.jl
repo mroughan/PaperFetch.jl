@@ -348,7 +348,7 @@ Return `true` when `source` (typically found by resolving an explicit
 identifier such as a DOI) has a title or author that hard-mismatches `entry`,
 or a publication year far enough away to indicate a different edition.
 
-This reuses the same field comparisons as [`compare_entry`](@ref) so the
+This reuses the same field comparisons as `compare_entry` so the
 "does this look like the same work" judgement is made consistently whether the
 mismatch is caught at provider-selection time or at report time.
 """
@@ -578,6 +578,7 @@ function title_search_records(provider::ApiProvider, entry::BibEntry)
     if entry.type in ("book", "inbook", "booklet", "manual", "proceedings")
         append!(sources, openlibrary_search_records(provider, entry))
         append!(sources, google_books_records(provider, query))
+        append!(sources, internet_archive_search_records(provider, entry))
     else
         append!(sources, crossref_search_records(provider, entry))
         append!(sources, openalex_search_records(provider, entry))
@@ -1056,6 +1057,71 @@ function google_books_records(provider::ApiProvider, query::AbstractString)
     end
 end
 
+"""
+    string_or_list(value)
+
+Coerce an Internet Archive advancedsearch.php field to `Vector{String}`.
+
+Solr (which backs Internet Archive's search) reports single-valued fields as
+a bare scalar and multi-valued fields as a JSON array, so a field such as
+`creator` or `isbn` can come back as either a string or a list depending on
+how many values that particular item has.
+"""
+function string_or_list(value)
+    value === nothing && return String[]
+    value isa AbstractString && return [String(value)]
+    return [String(v) for v in value]
+end
+
+function internet_archive_record_from_doc(doc)
+    identifier = optional_string(doc, :identifier)
+    identifier === nothing && return nothing
+    year = get(doc, :year, nothing)
+    isbns = string_or_list(get(doc, :isbn, nothing))
+    return SourceRecord(provider="internet-archive", id=identifier,
+        title=optional_string(doc, :title),
+        authors=string_or_list(get(doc, :creator, nothing)),
+        year=year === nothing ? nothing : string(year),
+        publisher=optional_string(doc, :publisher),
+        url="https://archive.org/details/$(identifier)",
+        pdf_url="https://archive.org/download/$(identifier)/$(identifier).pdf",
+        raw=Dict{String,Any}("isbn" => isbns))
+end
+
+"""
+    internet_archive_search_records(provider, entry)
+
+Search Internet Archive's `advancedsearch.php` API (restricted to
+`mediatype:texts`) by title/creator for a book-like entry.
+
+Internet Archive hosts many older and public-domain books that Open Library
+and Google Books do not surface, often with a scanned PDF available
+directly. The `pdf_url` is a best-effort guess at the conventional
+`{identifier}.pdf` filename within the item; if that file does not exist or
+is access-restricted (e.g. a lending-library title), the download simply
+fails like any other unavailable PDF candidate.
+"""
+function internet_archive_search_records(provider::ApiProvider, entry::BibEntry)
+    query = title_author_query(entry)
+    query === nothing && return SourceRecord[]
+    url = "https://archive.org/advancedsearch.php?q=$(escapeuri(query * " AND mediatype:texts"))" *
+        "&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=year&fl[]=publisher&fl[]=isbn" *
+        "&rows=3&page=1&output=json"
+    try
+        obj = provider_get_json(provider, url; headers=["User-Agent" => provider.user_agent])
+        hasproperty(obj, :response) || return SourceRecord[]
+        records = SourceRecord[]
+        for doc in obj.response.docs
+            record = internet_archive_record_from_doc(doc)
+            record === nothing || push!(records, record)
+        end
+        return records
+    catch err
+        return [SourceRecord(provider="internet-archive-error", id=query,
+            raw=Dict{String,Any}("error" => sprint(showerror, err)))]
+    end
+end
+
 function html_meta(content::AbstractString, names::Vector{String})
     for name in names
         rx = Regex("<meta[^>]+(?:name|property)=[\"']" * name * "[\"'][^>]+content=[\"']([^\"']+)[\"']", "is")
@@ -1189,12 +1255,28 @@ function cff_record(provider::ApiProvider, repo_url::AbstractString)
     return nothing
 end
 
-function url_records(provider::ApiProvider, url::AbstractString, entry::BibEntry)
+"""
+    url_records(provider, url, entry)
+
+Fetch `url` and return the `SourceRecord`(s) it yields: a direct PDF, a
+`CITATION.cff` (via `cff_record`), or HTML citation metadata.
+
+`url` is always one of `entry`'s own identifiers (`sources_for` only calls
+this on URLs already extracted from the entry's `url`/`note`/`howpublished`
+fields), so it is never independent information about the entry — it is only
+the address being resolved. The returned records therefore never set `url`
+to this address: doing so would let a page with no other extractable
+metadata (e.g. a landing page that exposes no citation meta tags) "match"
+the entry's own `url` field trivially, outscoring sources that verified real,
+independent title/author/doi data (see `source_resolution_score`).
+`id` still records the fetched address for identification and display.
+"""
+function url_records(provider::ApiProvider, url::AbstractString, ::BibEntry)
     try
         body = provider_get_text(provider, String(url); headers=["User-Agent" => provider.user_agent])
         if startswith(body, "%PDF")
-            return [SourceRecord(provider="url-pdf", id=String(url), title=get(entry.fields, "title", nothing),
-                url=String(url), pdf_url=String(url), raw=Dict{String,Any}("content" => "pdf"))]
+            return [SourceRecord(provider="url-pdf", id=String(url),
+                pdf_url=String(url), raw=Dict{String,Any}("content" => "pdf"))]
         end
         cff = cff_record(provider, url)
         cff === nothing || return [cff]
@@ -1208,7 +1290,7 @@ function url_records(provider::ApiProvider, url::AbstractString, entry::BibEntry
         end
         return [SourceRecord(provider="url-metadata", id=String(url), title=title,
             authors=authors, doi=doi === nothing ? nothing : normalize_doi(doi),
-            url=String(url), pdf_url=pdf, raw=Dict{String,Any}("content" => "html"))]
+            pdf_url=pdf, raw=Dict{String,Any}("content" => "html"))]
     catch err
         return [SourceRecord(provider="url-error", id=String(url),
             raw=Dict{String,Any}("error" => sprint(showerror, err)))]

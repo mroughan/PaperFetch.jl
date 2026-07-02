@@ -20,6 +20,7 @@ include("providers.jl")
 include("compare.jl")
 include("reports.jl")
 include("fetch.jl")
+include("pdf_verify.jl")
 include("cli.jl")
 
 function ignored_key_set(ignore_keys)
@@ -40,6 +41,7 @@ end
                        email="noreply@example.org", use_apis=false,
                        cache_dir=nothing, rate_limit_seconds=0.05,
                        ignore_keys=Set(["anon"]), check=:warn,
+                       verify_pdf_text=use_apis, pdf_http_get=HTTP.get,
                        progress_io=nothing)
 
 Read a bibliography, collect source metadata, and return one `EntryReport` per
@@ -53,7 +55,8 @@ Provider selection order:
 2. Explicitly supplied `providers` are appended.
 3. An `ApiProvider` is added when `use_apis=true`. It can query Crossref,
    OpenAlex, Unpaywall, DataCite, arXiv, Semantic Scholar, PubMed, CORE,
-   Figshare, Open Library, Google Books, and URL landing pages as appropriate.
+   Figshare, Open Library, Google Books, Internet Archive, and URL landing
+   pages as appropriate.
    For books without an ISBN, title/creator search results can supply an ISBN
    that is then used for ISBN-specific Open Library and Google Books lookups.
    GitHub repository URLs can use `CITATION.cff` as structured software
@@ -62,6 +65,17 @@ Provider selection order:
    only echoes each entry's own title/doi/url back as its "source". This
    cannot detect an incorrect doi, title, or author. A `@warn` is emitted when
    this fallback is used, and affected `EntryReport`s carry a matching note.
+
+When no provider found a reliable source for an entry but a PDF candidate URL
+was still found, `verify_pdf_text` (on by default when `use_apis=true`)
+downloads that one PDF and checks its extracted text (OCR as a last resort
+for scanned PDFs) for the entry's title, author, and year. This is a
+deliberate, narrowly-scoped exception to normally never downloading files
+just to check a bibliography — it only fires for entries that would
+otherwise be unresolved. Any match found flows through the same source
+comparison as any other provider, clearly attributed to `pdf-text`/`pdf-ocr`
+in the report so it reads as weaker, last-resort evidence rather than an
+authoritative metadata match.
 
 Set `cache_dir` to a directory path to cache API responses between runs.
 Set `rate_limit_seconds` to the minimum delay between uncached live API
@@ -91,6 +105,8 @@ function check_bibliography(path::AbstractString;
         rate_limit_seconds::Real                = 0.05,
         ignore_keys                             = Set(["anon"]),
         check::Symbol                           = :warn,
+        verify_pdf_text::Bool                    = use_apis,
+        pdf_http_get                            = HTTP.get,
         progress_io::Union{Nothing,IO}          = nothing)
     progress_message(progress_io, "Reading bibliography: $(path)")
     entries = read_items(path; check)
@@ -120,7 +136,16 @@ function check_bibliography(path::AbstractString;
         progress_message(progress_io, "[$(i)/$(total)] $(entry.key): resolving source metadata")
         sources = provider_sources(active, entry)
         progress_message(progress_io, "[$(i)/$(total)] $(entry.key): comparing $(length(sources)) source candidate$(length(sources) == 1 ? "" : "s")")
-        push!(reports, compare_entry(entry, sources))
+        report = compare_entry(entry, sources)
+        if verify_pdf_text && report.confidence == 0.0 && !isempty(report.pdf_candidates)
+            pdf_url = first(report.pdf_candidates)
+            progress_message(progress_io,
+                "[$(i)/$(total)] $(entry.key): no reliable source metadata; " *
+                "attempting full-text PDF verification of $(pdf_url)")
+            push!(sources, pdf_text_fallback_source(entry, pdf_url; http_get=pdf_http_get))
+            report = compare_entry(entry, sources)
+        end
+        push!(reports, report)
     end
     progress_message(progress_io, "Finished checking $(total) entr$(total == 1 ? "y" : "ies")")
     return reports

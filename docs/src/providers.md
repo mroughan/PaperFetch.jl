@@ -51,8 +51,11 @@ see:
 - arXiv identifiers use the arXiv API.
 - PMID values use PubMed.
 - ISBN-backed books can use Open Library and Google Books. Books without an
-  ISBN can first be searched by title and creator; any ISBN discovered in those
-  results is then used for ISBN-specific lookup.
+  ISBN can first be searched by title and creator across Open Library, Google
+  Books, and Internet Archive (restricted to `mediatype:texts`); any ISBN
+  discovered in those results is then used for ISBN-specific lookup. Internet
+  Archive often has older or public-domain books that the other two do not,
+  sometimes with a directly downloadable scanned PDF.
 - Entries with only a title, or entries whose identifier resolves to an
   obviously different work, can use title-and-author fallback search.
 - URL-backed entries can check the URL and read common citation metadata from

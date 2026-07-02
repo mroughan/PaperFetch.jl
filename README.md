@@ -25,9 +25,11 @@ or separate AI-assisted editing task can improve the bibliography deliberately.
   PMID, ISBN, and URL values found in fields such as `note` and `howpublished`.
 - Looks up metadata from deterministic fixtures or optional online providers:
   Crossref, OpenAlex, Unpaywall, DataCite, arXiv, Semantic Scholar, PubMed,
-  CORE, Figshare, Open Library, Google Books, and URL landing-page metadata.
-  Book lookups can search by title and creator to discover an ISBN, then retry
-  ISBN-specific metadata paths when the input BibTeX has no ISBN.
+  CORE, Figshare, Open Library, Google Books, Internet Archive, and URL
+  landing-page metadata.
+  Book lookups can search by title and creator across Open Library, Google
+  Books, and Internet Archive to discover an ISBN, then retry ISBN-specific
+  metadata paths when the input BibTeX has no ISBN.
   Software repository URLs can use `CITATION.cff` metadata when available.
 - Compares bibliography fields with cautious normalization for title case,
   page ranges, Unicode/LaTeX accents, DOI URL variants, author initials, and
@@ -42,6 +44,14 @@ or separate AI-assisted editing task can improve the bibliography deliberately.
   and year, or URL, before PaperFetch uses it as the source of truth. When a
   journal article and an arXiv preprint both plausibly match the same entry and
   the BibTeX does not distinguish them, the journal article is preferred.
+  Among near-tied candidates, the one that independently verified the most
+  fields is preferred over one that scored marginally higher by having fewer
+  fields to disagree on (see [Source Resolution](docs/src/reports.md)).
+- As a last resort, when no metadata provider can confirm an entry, but a PDF
+  candidate URL is known, `check` can download that one PDF and check its
+  extracted text for the entry's title, author, and year. This uses
+  `pdftotext`, falling back to OCR (`pdftoppm` + `tesseract`) for scanned
+  PDFs; see [External Tools](#external-tools-optional).
 - Writes Markdown and INC reports; INC is a spreadsheet-friendly CSV-like format
   handled by IncCSV.jl.
 - Optionally downloads PDFs from explicit PDF candidate URLs and writes fetch
@@ -165,6 +175,44 @@ The manifest records the reference key, compact title, fetch status, local file
 when downloaded, source URL, and a short diagnostic such as "no PDF candidate",
 "downloaded from ...", or a failed HTTP/content-type reason.
 
+## Full-Text PDF Verification (Last Resort)
+
+PaperFetch.jl normally never downloads a file just to check a bibliography.
+The one deliberate exception: when `check` (with `--use-apis`) finds no
+metadata provider that can reliably confirm an entry, but a PDF candidate URL
+is still known — for example, the entry's `url` field points straight at a
+PDF — it downloads that one PDF and checks its extracted text for the
+entry's title, author, and year. This only runs for entries that would
+otherwise be reported unresolved.
+
+Text is extracted with `pdftotext` first; only if that yields almost no text
+(a scanned/image-only PDF) does it fall back to OCR with `pdftoppm` and
+`tesseract` on the first few pages. See
+[External Tools (Optional)](#external-tools-optional) for installation. Any
+match is reported as a `pdf-text`/`pdf-ocr` source in the entry's notes, so it
+reads as weaker, last-resort evidence rather than an authoritative metadata
+match. Disable this behavior with `--no-verify-pdf-text` on the CLI or
+`verify_pdf_text=false` in the Julia API.
+
+## External Tools (Optional)
+
+Full-text PDF verification (above) shells out to command-line tools that are
+not Julia packages and are not installed automatically:
+
+- [`pdftotext`](https://poppler.freedesktop.org/) (poppler-utils) — reads a
+  PDF's embedded text layer.
+- `pdftoppm` (poppler-utils) and [`tesseract`](https://github.com/tesseract-ocr/tesseract)
+  — OCR fallback for scanned/image-only PDFs.
+
+Install on Debian/Ubuntu with `apt install poppler-utils tesseract-ocr`, or on
+macOS with `brew install poppler tesseract`. If these tools are not installed,
+PaperFetch.jl checks with `Sys.which` and silently skips full-text
+verification rather than erroring — every other feature works normally
+without them. A stand-alone executable built with PackageCompiler.jl (see the
+[stand-alone executable docs](docs/src/standalone.md)) does not bundle these
+system binaries either; they must be present on the target machine's `PATH`
+for full-text verification to work there.
+
 ## Credential-Assisted Fetching
 
 Credential-assisted fetching is local and opt-in. PaperFetch.jl never asks for
@@ -279,7 +327,10 @@ See [SECURITY.md](SECURITY.md). In short:
 - do not put usernames or passwords in command-line arguments;
 - keep cookie files local and private;
 - do not commit API caches, downloaded PDFs, or private bibliographies;
-- retrieve only material you are entitled to access.
+- retrieve only material you are entitled to access;
+- `check --use-apis` can download and locally parse one PDF per otherwise-
+  unresolved entry (see [Full-Text PDF Verification](#full-text-pdf-verification-last-resort));
+  pass `--no-verify-pdf-text` to disable it.
 
 ## Citation
 

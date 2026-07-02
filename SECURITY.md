@@ -31,6 +31,24 @@ Do not commit, upload, email, or paste:
 Generated outputs such as `.paperfetch_cache/`, `paperfetch_out/`, `downloads/`,
 and `docs/build/` are ignored by git and should usually stay local.
 
+## Full-Text PDF Verification
+
+`check --use-apis` normally only queries metadata APIs; it does not download
+files. The one exception is full-text PDF verification: when no metadata
+provider can confirm an entry, but a PDF candidate URL is known, `check`
+downloads that one PDF (anonymously, with no cookies or proxy credentials)
+and runs it through `pdftotext`, and optionally `pdftoppm`/`tesseract` for a
+scanned PDF, entirely on your own machine. No content is sent anywhere except
+the download itself.
+
+This means `check` can, by default when `--use-apis` is set, fetch and locally
+parse a file from a URL taken from the bibliography, using third-party
+open-source tools (poppler, tesseract) that PaperFetch.jl does not audit.
+Parsing any untrusted file with any tool carries some inherent risk. Pass
+`--no-verify-pdf-text` (or `verify_pdf_text=false` in the Julia API) to
+disable this if you are checking a bibliography from an untrusted source, or
+prefer not to download files during `check` at all.
+
 ## Responsible Use
 
 Use a real contact email for public scholarly APIs. Keep batches small, respect

@@ -295,6 +295,43 @@ const SOURCE_RESOLUTION_WEIGHTS = Dict(
 
 const SOURCE_RESOLUTION_MINIMUM = 0.58
 
+"""
+Score margin within which a candidate with more independently-verified
+fields (`comparison_richness`) is preferred over a marginally higher-scoring
+candidate that has fewer.
+
+`source_resolution_score` excludes `:missing_input`/`:missing_source`
+comparisons from its average rather than penalizing them, so a source that
+only supplies one comparable field (e.g. a landing-page fetch that echoes the
+entry's own `url` back) can score a perfect 1.0 on that single field, edging
+out a source such as Crossref that independently confirmed several fields
+but was not a perfect match on every one of them (e.g. a normalized rather
+than exact page-range match). This margin stops that near-empty record from
+winning purely on having less to disagree about.
+"""
+const SOURCE_RESOLUTION_TIE_MARGIN = 0.05
+
+"""
+    comparison_richness(comparisons)
+
+Count of field comparisons that reflect an actual value found in the source
+(i.e. not `:missing_input` or `:missing_source`).
+
+Used as a tie-breaker so that sources providing substantive, independently
+verified metadata are preferred over sparser sources within
+`SOURCE_RESOLUTION_TIE_MARGIN` of the top score.
+
+# Example
+
+```julia
+cmps = [FieldComparison("title", :exact, "A", "A", ""), FieldComparison("year", :missing_source, "2020", nothing, "")]
+comparison_richness(cmps) == 1
+```
+"""
+function comparison_richness(comparisons::Vector{FieldComparison})
+    return count(cmp -> cmp.status ∉ (:missing_input, :missing_source), comparisons)
+end
+
 function status_resolution_value(status::Symbol)
     status == :exact && return 1.0
     status == :normalized && return 0.95
@@ -431,6 +468,11 @@ When journal-article metadata and arXiv preprint metadata both match the same
 entry with equal source-resolution confidence, the journal article is preferred
 and the report records that choice in its notes.
 
+Among candidates within `SOURCE_RESOLUTION_TIE_MARGIN` of the top
+score, the one that independently verified the most fields is preferred, so a
+near-empty source that happens to score marginally higher on a single field
+does not win over a source that substantively confirmed the entry.
+
 The comparison is tolerant for bibliographic formatting, but conflicts are still
 reported explicitly. DOI values must match after DOI normalization. Author and
 editor names use the same normalization, including accents and initials.
@@ -459,10 +501,20 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
 
     provider_errors = filter(source_is_error, sources)
     usable_sources = filter(!source_is_error, sources)
+    # PDF candidates are collected from every usable source, not only a
+    # reliable one: a source can be too unreliable to confirm the entry's
+    # bibliographic identity (e.g. a title mismatch) while still reporting a
+    # real, worth-trying PDF URL. `fetch_pdfs` and the `verify_pdf_text`
+    # full-text fallback both depend on candidates surviving even when the
+    # entry is otherwise unresolved.
+    pdfs = String[]
+    for source in usable_sources
+        source.pdf_url !== nothing && source.pdf_url ∉ pdfs && push!(pdfs, source.pdf_url)
+    end
     if isempty(usable_sources)
         notes = isempty(provider_errors) ? ["no source metadata found"] :
             ["provider error: $(source.provider) $(get(source.raw, "error", ""))" for source in provider_errors]
-        return EntryReport(entry, sources, FieldComparison[], 0.0, notes, String[])
+        return EntryReport(entry, sources, FieldComparison[], 0.0, notes, pdfs)
     end
 
     # The `CandidateProvider` fallback (used when no fixture, explicit
@@ -495,6 +547,7 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
             comparisons=comparisons,
             score=score,
             evidence=evidence,
+            richness=comparison_richness(comparisons),
             preference=source_preference_score(source),
             reliable=!self_source &&
                 !source_hard_mismatch(entry, source, comparisons) &&
@@ -526,11 +579,19 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
         for source in provider_errors
             push!(notes, "provider error: $(source.provider) $(get(source.raw, "error", ""))")
         end
-        return EntryReport(entry, sources, FieldComparison[], 0.0, notes, String[])
+        return EntryReport(entry, sources, FieldComparison[], 0.0, notes, pdfs)
     end
 
-    ranked = sort!(collect(reliable_candidates),
+    by_score = sort!(collect(reliable_candidates),
         by=candidate -> (candidate.score, candidate.preference), rev=true)
+    top_scoring = first(by_score)
+    # A near-tied candidate that independently verified more fields is
+    # preferred over a marginally higher-scoring one that verified less; see
+    # `SOURCE_RESOLUTION_TIE_MARGIN`.
+    contenders = filter(candidate -> candidate.score >= top_scoring.score - SOURCE_RESOLUTION_TIE_MARGIN,
+        reliable_candidates)
+    ranked = sort!(collect(contenders),
+        by=candidate -> (candidate.richness, candidate.score, candidate.preference), rev=true)
     best = first(ranked)
     best_source      = best.source
     best_comparisons = best.comparisons
@@ -538,6 +599,13 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
 
     notes = String["best source: $(best_source.provider) ($(source_identity(best_source)))"]
     push!(notes, "source resolution confidence $(best_score); evidence: $(join(best.evidence, "; "))")
+    if best.source !== top_scoring.source
+        push!(notes, "preferred $(best_source.provider) ($(round(best_score; digits=3)), " *
+            "$(best.richness) verified field$(best.richness == 1 ? "" : "s")) over " *
+            "$(top_scoring.source.provider) ($(round(top_scoring.score; digits=3)), " *
+            "$(top_scoring.richness) verified field$(top_scoring.richness == 1 ? "" : "s")), which scored " *
+            "marginally higher but with less independently-verified metadata")
+    end
     self_comparison_only && push!(notes, self_comparison_note)
     if journal_article_source(best_source) &&
             any(candidate -> candidate.source !== best_source &&
@@ -565,10 +633,6 @@ function compare_entry(entry::BibEntry, sources::Vector{SourceRecord};
     for cmp in best_comparisons
         cmp.status in (:conflict, :ambiguous, :missing_input) &&
             push!(notes, "$(cmp.field): $(cmp.note)")
-    end
-    pdfs = String[]
-    for source in usable_sources
-        source.pdf_url !== nothing && source.pdf_url ∉ pdfs && push!(pdfs, source.pdf_url)
     end
     return EntryReport(entry, sources, best_comparisons, max(best_score, 0.0), notes, pdfs)
 end

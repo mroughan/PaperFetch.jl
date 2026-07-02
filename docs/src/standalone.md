@@ -179,7 +179,16 @@ Important operational details:
   matter for their institution or bibliography.
 - Test with `--use-apis` on the target network if the app is expected to query
   Crossref, OpenAlex, Unpaywall, DataCite, arXiv, Semantic Scholar, PubMed,
-  CORE, Figshare, Open Library, Google Books, or URL landing pages.
+  CORE, Figshare, Open Library, Google Books, Internet Archive, or URL landing
+  pages.
+- PackageCompiler bundles Julia and its packages, but not external
+  command-line tools. Full-text PDF verification (`--use-apis` without
+  `--no-verify-pdf-text`) shells out to `pdftotext`, and optionally
+  `pdftoppm`/`tesseract` for scanned PDFs; these must be installed separately
+  on the target machine and available on its `PATH`, or PaperFetch.jl detects
+  their absence and silently skips that one feature. See
+  [External Tools](https://github.com/mroughan/PaperFetch.jl/blob/main/README.md#external-tools-optional)
+  in the README.
 - Keep a deterministic fixture-backed smoke test in release notes so users can
   distinguish packaging failures from network/API failures.
 

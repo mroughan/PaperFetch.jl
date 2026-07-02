@@ -1,10 +1,12 @@
 # APIs To Consider
 
 PaperFetch already has adapters for Crossref, OpenAlex, Unpaywall, DataCite,
-arXiv, Open Library, Google Books, Semantic Scholar, PubMed, CORE, Figshare,
-and simple landing-page metadata. The APIs below are plausible future additions,
-but should remain optional until we have examples showing they improve real
-bibliography checks.
+arXiv, Open Library, Google Books, Internet Archive, Semantic Scholar, PubMed,
+CORE, Figshare, and simple landing-page metadata. It can also verify an
+otherwise-unresolved entry against the extracted text (OCR as a last resort)
+of a directly-known PDF candidate. The APIs below are plausible future
+additions, but should remain optional until we have examples showing they
+improve real bibliography checks.
 
 ## Europe PMC
 

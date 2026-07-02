@@ -91,9 +91,19 @@ julia --project=. -e 'using PaperFetch; PaperFetch.main()' -- \
 ```
 
 The live adapter can query Crossref, OpenAlex, Unpaywall, DataCite, arXiv,
-Semantic Scholar, PubMed, CORE, Figshare, Open Library, Google Books, and URL
-landing-page metadata. API behavior can change, so fixture-backed checks remain
-the preferred path for deterministic tests and repeated review.
+Semantic Scholar, PubMed, CORE, Figshare, Open Library, Google Books, Internet
+Archive, and URL landing-page metadata. API behavior can change, so
+fixture-backed checks remain the preferred path for deterministic tests and
+repeated review.
+
+When live checks are enabled and no provider can confirm an entry, but a PDF
+candidate URL is known, `check` also attempts full-text PDF verification as a
+last resort: it downloads that one PDF and checks its extracted text for the
+entry's title, author, and year (falling back to OCR for scanned PDFs). Pass
+`--no-verify-pdf-text` to disable it. This is the one case where PaperFetch.jl
+downloads a file during `check` rather than only during `fetch`; see
+[External Tools](https://github.com/mroughan/PaperFetch.jl/blob/main/README.md#external-tools-optional)
+in the README for the optional `pdftotext`/`tesseract` dependencies it uses.
 
 ## Manual Online Field Tests
 

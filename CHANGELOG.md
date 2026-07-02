@@ -67,6 +67,127 @@
   still captured and the ORCID lands in `raw["orcids"]`.
 - Updated `progress reporting` testset to assert the exact symmetric
   "Finished fetching PDFs for N references" wording.
+
+### Bug fixes (round 4)
+- Fixed `url_records` (`url-metadata`/`url-pdf` sources) echoing the fetched
+  URL back as the source's `url` field. `url_records` is only ever called on
+  a URL already extracted from the entry itself, so that string is never
+  independent information — comparing it against the entry's `url` field
+  always reported an "exact" match even when the landing page (e.g. IEEE
+  Xplore for a DOI resolver link) exposed no other citation metadata at all.
+  Combined with the source-resolution scoring bug below, this let a
+  metadata-free landing-page fetch outrank Crossref, OpenAlex, and Unpaywall
+  records that had independently confirmed the DOI, title, author, and other
+  fields, and triggered a misleading "doi does not match this entry's
+  title/author" note. `url_records` no longer sets `url` on the records it
+  returns (the fetched address is still kept in `id` for identification), and
+  no longer echoes the entry's own `title` field back for direct-PDF sources.
+- Fixed `source_resolution_score`: comparisons with no source value
+  (`:missing_source`) are excluded from both the score's numerator and
+  denominator rather than counted as an imperfect match, so a candidate with
+  only one comparable field could score a perfect 1.0 on that field alone and
+  outrank a candidate that substantively verified many fields but wasn't a
+  perfect match on every one (e.g. a normalized rather than exact page-range
+  match). `compare_entry` now prefers the candidate with the most
+  independently-verified fields (`comparison_richness`) among candidates
+  within `SOURCE_RESOLUTION_TIE_MARGIN` (0.05) of the top score, and records
+  the tie-break in the report's notes when it changes the outcome.
+- Fixed `compare_entry` discarding all PDF candidates whenever an entry had
+  no *reliable* source, even if a less-reliable (or otherwise-discarded)
+  source still reported a real `pdf_url`. `EntryReport.pdf_candidates` is now
+  collected from every usable source regardless of whether it was reliable
+  enough to confirm the entry's identity, so `fetch_pdfs` (and the new
+  full-text verification below) can still try a PDF whose bibliographic
+  metadata could not otherwise be confirmed.
+
+### PDF full-text verification (last resort)
+- Added `verify_pdf_text` to `check_bibliography` (on by default when
+  `use_apis=true`): when no metadata provider found a reliable source for an
+  entry, but a PDF candidate URL is known, downloads that one PDF and checks
+  its extracted text for the entry's title, author, and year. This is a
+  deliberate, narrowly-scoped exception to normally never downloading files
+  just to check a bibliography — it only runs as a last resort for entries
+  that would otherwise be reported unresolved.
+- Text is extracted via `pdftotext` (poppler-utils) first, since most PDFs
+  are born-digital; only if that yields fewer than `PDF_TEXT_MIN_CHARS` (40)
+  characters — a scanned/image-only PDF — does it fall back to OCR
+  (`pdftoppm` + `tesseract`) on the first `PDF_OCR_MAX_PAGES` (3) pages. Both
+  tools are optional: `pdftotext_available()`/`ocr_tools_available()` check
+  `Sys.which`, and verification is silently skipped if they are missing.
+- Only fields actually found in the extracted text are populated on the
+  resulting `pdf-text`/`pdf-ocr` `SourceRecord` (via `pdf_text_confirmation`);
+  fields not found stay unconfirmed. This lets the result flow through the
+  same `compare_entry` scoring and "insufficient identity evidence" discard
+  logic as every other provider, rather than needing a special case, and
+  keeps it clearly attributed as weaker, last-resort evidence rather than an
+  authoritative metadata match.
+- A failed download (e.g. paywalled or unreachable PDF) is recorded as a
+  `pdf-text-error` source, surfaced as a provider-error note like every other
+  adapter's error record, rather than raising.
+- Added the `--no-verify-pdf-text` CLI flag (mirrors `verify_pdf_text=false`
+  in the Julia API) to disable this behavior, since it is the one case where
+  `check` downloads a file rather than only querying metadata.
+
+### Docs (round 4)
+- README: documented the Internet Archive provider, the richer-metadata
+  tie-break, and added "Full-Text PDF Verification (Last Resort)" and
+  "External Tools (Optional)" sections covering the new `pdftotext`/
+  `pdftoppm`/`tesseract` dependencies, how to install them, that they are
+  silently skipped when absent, and that a PackageCompiler-built stand-alone
+  executable does not bundle them. Added a Security section bullet noting
+  `check --use-apis` can now download and parse a PDF.
+- `docs/src/index.md`: added the tie-break and full-text-verification
+  behaviors to Design Commitments.
+- `docs/src/examples.md` and `docs/src/standalone.md`: added Internet Archive
+  to the live-provider lists; noted the full-text verification exception to
+  "no downloads during check" and the external-tool dependency for
+  stand-alone builds.
+- `docs/src/reports.md`: added "Scoring And Near-Ties" (explaining why a
+  near-empty source no longer outranks a richer one, and the note format when
+  it changes the outcome) and "Full-Text PDF Verification" sections under
+  Source Resolution.
+- `SECURITY.md`: added a "Full-Text PDF Verification" section explaining what
+  is downloaded, that it happens anonymously with no credentials, that it
+  runs third-party tools (poppler, tesseract) PaperFetch.jl does not audit,
+  and how to disable it.
+- `CONTRIBUTING.md`: added an "Optional System Tools" section (install
+  commands for poppler-utils/tesseract-ocr/imagemagick, and why tests skip
+  gracefully without them) and two "Adding Providers Or Lookup Logic"
+  guidelines: never echo a field's own input/query value back as if it were
+  independently-verified evidence, and watch for Solr/Elasticsearch-style
+  scalar-vs-array field shapes.
+- `TO_CONSIDER.md`: updated the "already has adapters for" list to include
+  Internet Archive and full-text PDF verification.
+
+### Tests (round 4)
+- Added `DOI-echo URLs do not inflate source ranking`, covering: a DOI
+  resolver landing page with no citation metadata, an ordinary (non-DOI)
+  landing-page URL, and a direct-PDF fetch via a DOI resolver link — none of
+  which may echo `url`, and the direct-PDF case must not claim the entry's
+  own `title` either.
+- Added `richer metadata wins a near-tied source-resolution score`, an
+  end-to-end regression for the Brent (1973) *IEEE Transactions on Computers*
+  entry that originally surfaced this pair of bugs.
+- Extended `source selection rejects hard mismatches` with a case where a
+  single-field "exact" match (score 1.0) competes against a multi-field
+  near-exact match (score < 1.0); the richer source must still win.
+- Added `pdf_text_confirmation matches only what the extracted text
+  confirms`, covering full confirmation, partial (nothing found) results, and
+  that both flow correctly through `compare_entry`.
+- Added `extract_pdf_text reads a born-digital PDF's text layer` and
+  `extract_pdf_text falls back to OCR for a scanned PDF`, each skipped with an
+  `@info` message when the required command-line tools (`pdftotext`, or
+  `pdftoppm`/`tesseract`/ImageMagick's `convert`) are not installed.
+- Added `check_bibliography verifies an otherwise-unresolved entry via PDF
+  text`, an end-to-end test with a mocked download confirming an entry whose
+  only candidate was a metadata-free direct-PDF link, and that the same entry
+  stays unresolved with `verify_pdf_text=false`.
+- Extended `book and repository provider shapes` with Internet Archive
+  coverage: multi-valued vs. single-valued `creator`/`isbn` shapes, an
+  integer `year`, a result missing `identifier` (must be skipped), and that
+  book-type `title_search_records` includes an `internet-archive` result.
+  Extended `provider cache and error branches` with the
+  `internet-archive-error` case.
 - `check_bibliography` now emits a clear `@warn` when it falls back to
   `CandidateProvider` (no fixture, no explicit `providers`, `use_apis=false`),
   since that fallback only echoes each entry's own title/doi/url back as its
@@ -74,6 +195,23 @@
 - `compare_entry` now adds an explicit note to the `EntryReport` itself in
   that same situation, so the limitation is visible in the generated
   Markdown/INC report, not only in a log line a reader may not see.
+
+### New providers (round 4)
+- Added an Internet Archive `advancedsearch.php` adapter
+  (`internet_archive_search_records`) to the book/title-search path alongside
+  Open Library and Google Books. Internet Archive often has older or
+  public-domain books the other two do not, and its `pdf_url` guess (the
+  conventional `{identifier}.pdf` filename within the item) sometimes yields
+  a directly downloadable scanned PDF, which neither Open Library nor Google
+  Books' search results otherwise provide.
+- Handles Internet Archive's Solr-backed field shapes, where a multi-valued
+  field (e.g. `creator`, `isbn`) comes back as a JSON array but a
+  single-valued one comes back as a bare scalar for the very same field name
+  (`string_or_list`), and where `year` is a bare integer rather than a
+  string.
+- A guessed `pdf_url` that turns out not to exist, or is access-restricted
+  (e.g. a lending-library title), simply fails like any other unavailable PDF
+  candidate — it is not treated as an error.
 
 ### Architecture
 - Split monolithic `src/PaperFetch.jl` into focused include files:
